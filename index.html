@@ -109,6 +109,131 @@
         
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* [User Custom Design] Delivery Card */
+        .delivery-card { 
+           position: relative; 
+           background: #ffffff; 
+           border-radius: 16px; 
+           border: 1px solid #e5e7eb; 
+           margin: 12px; 
+           overflow: hidden; 
+           transition: all 0.2s;
+         } 
+         
+         .delivery-card.current { 
+           border-color: #4f46e5; 
+           background: #eef2ff; 
+         } 
+         
+         .status-bar { 
+           height: 4px; 
+           background: #4f46e5; 
+         } 
+         
+         .order-badge { 
+           position: absolute; 
+           top: 8px; 
+           left: 8px; 
+           width: 32px; 
+           height: 32px; 
+           background: #4f46e5; 
+           color: #ffffff; 
+           border-radius: 50%; 
+           font-size: 13px; 
+           font-weight: 800; 
+           display: flex; 
+           align-items: center; 
+           justify-content: center; 
+           z-index: 10;
+         } 
+         
+         .card-body { 
+           padding: 16px; 
+           display: flex; 
+           flex-direction: column; 
+           gap: 12px; 
+         } 
+         
+         .current-label { 
+           font-size: 12px; 
+           font-weight: 800; 
+           color: #4338ca; 
+         } 
+         
+         .phone-btn { 
+           display: block; 
+           background: #4f46e5; 
+           color: #ffffff; 
+           text-align: center; 
+           padding: 14px; 
+           border-radius: 14px; 
+            font-size: 22px; 
+           font-weight: 800; 
+           text-decoration: none; 
+         } 
+         
+         .address { 
+           font-size: 14px; 
+           font-weight: 600; 
+           color: #1f2937; 
+           line-height: 1.4;
+         } 
+         
+         .time { 
+           font-size: 12px; 
+           color: #475569; 
+         } 
+         
+         .complete-btn { 
+           margin-top: 4px; 
+           padding: 14px; 
+           font-size: 15px; 
+           font-weight: 800; 
+           border: none; 
+           border-radius: 14px; 
+           background: #22c55e; 
+           color: #ffffff; 
+           cursor: pointer;
+         }
+         
+         .map-btn {
+            margin-top: 8px;
+            padding: 12px;
+            font-size: 14px;
+            font-weight: 700;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            background: #f8fafc;
+            color: #475569;
+            width: 100%;
+            cursor: pointer;
+         }
+ 
+         .time-pill {
+            align-self: flex-start;
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+            background: #e0e7ff;
+            color: #4338ca;
+         }
+ 
+         /* Status Variants */
+         .delivery-card.completed {
+             background: #f8fafc;
+             border-color: #e2e8f0;
+             opacity: 0.6;
+         }
+         .delivery-card.canceled {
+             border-color: #fecaca;
+             background: #fff;
+         }
+         .delivery-card.postponed {
+             border-color: #fb923c;
+             background: #fff7ed;
+         }
     </style>
 </head>
 <body class="bg-[#F4F5F7] text-slate-800 antialiased selection:bg-indigo-100 selection:text-indigo-700">
@@ -214,6 +339,7 @@
 
                     localStorage.setItem(Config.STORAGE_KEYS.DELIVERIES, JSON.stringify(data));
                     
+                    let serverSynced = false;
                     // [New] Local Server Sync (Async Await)
                     try {
                         const res = await fetch('/api/save', {
@@ -223,6 +349,7 @@
                         });
                         if (!res.ok) throw new Error('Server save failed');
                         console.log("[Server] Data synced");
+                        serverSynced = true;
                     } catch (e) {
                         console.warn("[Server] Sync failed (Local mode?)", e);
                         // 서버 저장 실패 시 사용자에게 알림 (선택 사항)
@@ -234,9 +361,12 @@
                             console.log("[AutoSync] Synced to cloud");
                         }).catch(e => console.warn("[AutoSync] Failed", e));
                     }
+                    
+                    return serverSynced;
                 } catch (e) {
                     console.error("[Storage] Failed to save deliveries", e);
                     alert("저장 공간 부족으로 데이터를 저장할 수 없습니다.");
+                    return false;
                 }
             },
             loadDeliveries: () => {
@@ -487,6 +617,16 @@
             return { lat: 37.5665, lng: 126.9780 }; // Default: 서울시청
         }
 
+        function formatTimeRange(start, minutes) {
+            if (!start) return '예약시간';
+            const [hh, mm] = start.split(':').map(x => parseInt(x, 10));
+            const total = hh * 60 + mm + (parseInt(minutes, 10) || 0);
+            const eh = Math.floor(total / 60);
+            const em = total % 60;
+            const pad = n => (n < 10 ? '0' + n : '' + n);
+            return `${start} ~ ${pad(eh)}:${pad(em)}`;
+        }
+
         function parseCustomDate(dateStr) {
             // [안전장치] 값이 없으면 오늘 날짜 반환 (Local Time - KST Support)
             if (!dateStr) {
@@ -695,36 +835,43 @@
         // [컴포넌트] 로그인/메인 진입 화면
         function LoginScreen({ onLogin }) {
             const [driverName, setDriverName] = useState('');
-            // const [showInstallGuide, setShowInstallGuide] = useState(false); // Removed unused state
 
             return (
-                <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 animate-fade-in">
-                    <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center space-y-8 border border-slate-100">
-                        <div className="space-y-2">
-                            <div className="w-20 h-20 bg-indigo-600 rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-indigo-200 mb-4">
-                                <span className="text-4xl">🚚</span>
+                <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex flex-col items-center justify-center p-6 animate-fade-in">
+                    <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center space-y-8 border border-white/50 ring-1 ring-indigo-50">
+                        <div className="space-y-4">
+                            <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl mx-auto flex items-center justify-center shadow-lg shadow-indigo-200 mb-6 transform hover:scale-105 transition-transform duration-300">
+                                <span className="text-5xl filter drop-shadow-md">🚚</span>
                             </div>
-                            <h1 className="text-3xl font-black text-slate-900 tracking-tight">배송 마스터</h1>
-                            <p className="text-slate-500 font-medium">기사님 이름을 입력하여 시작하세요</p>
+                            <div>
+                                <h1 className="text-3xl font-black text-slate-900 tracking-tight mb-2">배송 마스터</h1>
+                                <p className="text-slate-500 font-medium text-sm">기사님, 오늘도 안전운전 하세요!</p>
+                            </div>
                         </div>
 
-                        <div className="space-y-3">
-                            <input 
-                                type="text" 
-                                placeholder="기사 이름 입력 (예: 홍길동)" 
-                                className="w-full bg-slate-50 border p-4 rounded-xl text-lg font-bold text-center focus:ring-2 focus:ring-indigo-500 outline-none mb-2"
-                                value={driverName}
-                                onChange={(e) => setDriverName(e.target.value)}
-                                onKeyPress={(e) => {
-                                    if(e.key === 'Enter') {
-                                        if (/^[가-힣]{2,10}$/.test(driverName.trim())) {
-                                            onLogin('driver', driverName.trim());
-                                        } else {
-                                            alert("올바른 한글 이름(2~10자)을 입력해주세요.");
+                        <div className="space-y-4">
+                            <div className="relative group">
+                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                    <span className="text-gray-400 group-focus-within:text-indigo-500 transition-colors">👤</span>
+                                </div>
+                                <input 
+                                    type="text" 
+                                    placeholder="이름을 입력해주세요" 
+                                    className="w-full bg-slate-50 border border-slate-200 p-4 pl-11 rounded-2xl text-lg font-bold text-slate-800 placeholder:text-slate-400 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all"
+                                    value={driverName}
+                                    onChange={(e) => setDriverName(e.target.value)}
+                                    onKeyPress={(e) => {
+                                        if(e.key === 'Enter') {
+                                            if (/^[가-힣]{2,10}$/.test(driverName.trim())) {
+                                                onLogin('driver', driverName.trim());
+                                            } else {
+                                                alert("올바른 한글 이름(2~10자)을 입력해주세요.");
+                                            }
                                         }
-                                    }
-                                }}
-                            />
+                                    }}
+                                />
+                            </div>
+
                             <button 
                                 onClick={() => {
                                     if (/^[가-힣]{2,10}$/.test(driverName.trim())) {
@@ -733,15 +880,18 @@
                                         alert("올바른 한글 이름(2~10자)을 입력해주세요.");
                                     }
                                 }}
-                                className="w-full bg-indigo-600 text-white p-4 rounded-xl font-bold text-lg shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all flex items-center justify-center gap-2"
+                                className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 rounded-2xl font-bold text-lg shadow-lg shadow-indigo-200 hover:shadow-indigo-300 hover:-translate-y-0.5 active:scale-95 transition-all flex items-center justify-center gap-2"
                             >
-                                <span>📱</span> 로그인
+                                <span>시작하기</span>
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
                             </button>
+
                             <div className="relative flex py-2 items-center">
                                 <div className="flex-grow border-t border-slate-200"></div>
-                                <span className="flex-shrink-0 mx-4 text-slate-400 text-xs">또는</span>
+                                <span className="flex-shrink-0 mx-4 text-slate-300 text-xs font-bold uppercase tracking-wider">Admin Access</span>
                                 <div className="flex-grow border-t border-slate-200"></div>
                             </div>
+                            
                             <button 
                                 onClick={() => {
                                     const pwd = prompt('관리자 비밀번호를 입력하세요:');
@@ -751,33 +901,37 @@
                                         alert('비밀번호가 올바르지 않습니다.');
                                     }
                                 }}
-                                className="w-full bg-slate-100 text-slate-600 p-4 rounded-xl font-bold text-lg hover:bg-slate-200 active:scale-95 transition-all flex items-center justify-center gap-2"
+                                className="w-full bg-white text-slate-500 border border-slate-200 p-3 rounded-xl font-bold text-sm hover:bg-slate-50 hover:text-slate-700 active:bg-slate-100 transition-all flex items-center justify-center gap-2"
                             >
-                                <span>⚙️</span> 관리자로 로그인
+                                <span>⚙️</span> 관리자 모드
                             </button>
+                        </div>
+                        
+                        <div className="text-xs text-slate-400">
+                            v2.1 MVP Release
                         </div>
                     </div>
                 </div>
             );
         }
 
-        // [Component] Reusable Card Component (UI Overhaul)
+        // [Component] Reusable Card Component (Modernized)
         const Card = ({ title, description, actions, children, className = "", loading = false }) => {
             return (
-                <div className={`bg-white rounded-xl shadow-sm hover:shadow-[0_4px_8px_rgba(0,0,0,0.1)] transition-all duration-300 border border-[#E6E8EA] overflow-hidden group ${className}`}>
+                <div className={`bg-white rounded-2xl shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 border border-slate-100 overflow-hidden group ${className}`}>
                     {(title || actions) && (
-                        <div className="p-5 border-b border-[#E6E8EA] bg-white flex justify-between items-center">
+                        <div className="p-5 border-b border-slate-50 bg-slate-50/50 flex justify-between items-center relative">
                             <div className="w-full text-center">
-                                {title && <h3 className="font-bold text-lg text-[#0052CC] flex items-center justify-center gap-2">{title}</h3>}
+                                {title && <h3 className="font-bold text-lg text-slate-800 flex items-center justify-center gap-2">{title}</h3>}
                                 {description && <p className="text-sm text-slate-500 mt-1">{description}</p>}
                             </div>
-                            {actions && <div className="flex gap-2 absolute right-5">{actions}</div>}
+                            {actions && <div className="flex gap-2 absolute right-5 top-1/2 -translate-y-1/2">{actions}</div>}
                         </div>
                     )}
                     <div className={`p-5 relative ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
                         {loading && (
-                            <div className="absolute inset-0 bg-white/50 z-10 flex items-center justify-center">
-                                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0052CC]"></div>
+                            <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] z-10 flex items-center justify-center">
+                                 <div className="animate-spin rounded-full h-8 w-8 border-4 border-slate-200 border-t-indigo-600"></div>
                             </div>
                         )}
                         {children}
@@ -785,6 +939,44 @@
                 </div>
             );
         };
+
+        function DeliveryCard({ item, order, isCurrent, onComplete }) {
+            return (
+                <div className={`relative rounded-2xl px-4 py-3 border transition ${item.completed ? 'opacity-60' : ''} ${isCurrent ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-white'}`}>
+                    <div className="absolute -top-2 -left-2 w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">
+                        {order}
+                    </div>
+                    <div className="flex justify-between items-start">
+                        <div className="flex-1 pr-2">
+                            {isCurrent && (
+                                <p className="text-[11px] font-bold text-indigo-600 mb-1">
+                                    🚚 현재 배송 중
+                                </p>
+                            )}
+                            <div className="font-semibold text-slate-900 text-sm leading-snug">📍 {item.address}</div>
+                            <div className="text-xs text-slate-500 mt-0.5">📦 {item.item}</div>
+                            <div className="text-xs text-slate-500 mt-1">
+                                <a href={`tel:${item.phone}`}>📞 {item.phone || '번호없음'}</a>
+                            </div>
+                        </div>
+                        <div className="flex gap-1 shrink-0 items-center">
+                            {(item.scheduled_time || item.time) && (
+                                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full shrink-0">
+                                    ⏰ {(item.scheduled_time || item.time)}
+                                </span>
+                            )}
+                            {item.canceled && <span className="text-[10px] font-bold text-white bg-red-500 px-2 py-1 rounded-full shrink-0">취소됨</span>}
+                            {item.completed && <span className="text-[10px] font-bold text-white bg-green-600 px-2 py-1 rounded-full shrink-0">완료</span>}
+                            {!item.completed && (
+                                <button onClick={() => onComplete(item.id, order)} className="px-2 py-1 text-xs font-bold rounded bg-indigo-600 text-white shadow-sm active:scale-95">
+                                    완료
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
 
         // [광고] AdSense Banner Component
         const AdBanner = ({ className = "", slot, format = "auto", fullWidth = true }) => {
@@ -955,6 +1147,49 @@
                                             <li>현장에서 <strong>비용(양중비 등)</strong>과 <strong>상태(완료/취소)</strong>를 입력합니다.</li>
                                             <li>작업 내용은 <strong>자동으로 서버에 저장</strong>됩니다. (또는 <strong>[서버에 올리기]</strong>)</li>
                                         </ol>
+                                    </div>
+                                    
+                                    {/* 제어바: 배송카드 아래로 이동 */}
+                                    <div className="mt-2">
+                                        <div className="flex items-center justify-between px-3 py-2 gap-2">
+                                            <div className="flex-1 min-h-[44px] flex items-center">
+                                                {isMergeMode && (
+                                                    <div className="w-full rounded-xl bg-indigo-50 border border-indigo-100 px-3 py-2 flex items-center justify-between">
+                                                        <div>
+                                                            <p className="text-xs font-semibold text-indigo-700">합칠 배송지를 선택하세요</p>
+                                                            <p className="text-[11px] text-indigo-500">{selectedMergeIds.length}건 선택됨</p>
+                                                        </div>
+                                                        <button
+                                                            disabled={selectedMergeIds.length < 2}
+                                                            onClick={handleMergeDeliveries}
+                                                            className={`ml-3 px-3 py-1.5 rounded-lg text-xs font-bold ${
+                                                                selectedMergeIds.length < 2
+                                                                ? 'bg-slate-200 text-slate-400'
+                                                                : 'bg-indigo-600 text-white'
+                                                            }`}
+                                                        >
+                                                            하나로 합치기
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-2 flex-shrink-0">
+                                                <button
+                                                    onClick={() => { setIsMergeMode(!isMergeMode); setSelectedMergeIds([]); }}
+                                                    className={`px-3 py-1 rounded-full text-xs font-medium ${isMergeMode ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}
+                                                >
+                                                    합치기
+                                                </button>
+                                                <button
+                                                    onClick={() => setView('driver_add')}
+                                                    className="w-9 h-9 rounded-full bg-indigo-600 text-white text-xl leading-none"
+                                                    title="배송지 추가"
+                                                    aria-label="배송지 추가"
+                                                >
+                                                    +
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                     
                                     <div className="space-y-3">
@@ -1134,6 +1369,7 @@
             const [customerFilterMonth, setCustomerFilterMonth] = useState(new Date().toISOString().slice(0, 7));
             const [customerFilterDate, setCustomerFilterDate] = useState(new Date().toISOString().slice(0, 10));
             const [customerSearchTerm, setCustomerSearchTerm] = useState(''); // [New] 검색어 상태
+            const [showAllDates, setShowAllDates] = useState(false); // [New] 전체 날짜 보기 토글
 
             // [Cloud] 클라우드 동기화 상태
             const [isCloudModalOpen, setCloudModalOpen] = useState(false);
@@ -1142,6 +1378,8 @@
             // [Modal] 월별 비용 합계 상태
             const [showMonthlyCostModal, setShowMonthlyCostModal] = useState(false);
             const [monthlyCostTargetMonth, setMonthlyCostTargetMonth] = useState(new Date().toISOString().slice(0, 7));
+            const [monthlyViewMode, setMonthlyViewMode] = useState('month');
+            const [monthlyCostTargetDay, setMonthlyCostTargetDay] = useState(new Date().toISOString().slice(0, 10));
 
             // [UI] 엑셀 업로드 파일명
             const [uploadedFileName, setUploadedFileName] = useState('');
@@ -1158,6 +1396,11 @@
             // [New] 배송 건 합치기 모드 상태
             const [isMergeMode, setIsMergeMode] = useState(false);
             const [selectedMergeIds, setSelectedMergeIds] = useState([]);
+            const [currentOrder, setCurrentOrder] = useState(1);
+            
+            function mergeSelectedDeliveries() {
+                handleMergeDeliveries();
+            }
 
             // [State] History (Undo)
             const [history, setHistory] = useState([]);
@@ -1368,53 +1611,77 @@
                     
                     // 1. 배송 데이터 시트
                     const sheet = workbook.addWorksheet('배송목록');
+                    
+                    // [수정] 사용자 요청 컬럼 적용
                     sheet.columns = [
-                        { header: 'ID', key: 'id', width: 36 },
                         { header: '날짜', key: 'date', width: 12 },
-                        { header: '고객명/품목', key: 'item', width: 30 },
+                        { header: '제품명', key: 'item', width: 30 },
                         { header: '주소', key: 'address', width: 40 },
                         { header: '연락처', key: 'phone', width: 15 },
                         { header: '기사', key: 'driver', width: 10 },
-                        { header: '상태', key: 'status', width: 10 },
+                        { header: '상태', key: 'status_text', width: 12 }, // 정상/연기/취소/부분/완료
                         { header: '설치비', key: 'install_fee', width: 10 },
                         { header: '양중비', key: 'yangjung', width: 10 },
                         { header: '내림비', key: 'naerim', width: 10 },
-                        { header: '기타비', key: 'etc_fee', width: 10 },
+                        { header: '기타비용', key: 'etc_fee', width: 10 },
                         { header: '메모', key: 'memo', width: 20 },
-                        { header: '예약시간', key: 'reservation_time', width: 15 },
-                        { header: '설치시간', key: 'fix_time', width: 15 },
+                        { header: '예약시간', key: 'time', width: 15 },
+                        { header: '설치시간', key: 'duration', width: 10 },
                         { header: '순서', key: 'sequence_number', width: 8 },
-                        { header: '합치기 정보 (JSON)', key: '_mergedOriginals', width: 20 },
-                        { header: '상세 품목 (JSON)', key: 'detail_items', width: 20 },
-                        { header: '기타 속성 (JSON)', key: 'others', width: 20 }
+                        { header: '합치기', key: 'merge_info', width: 15 }
                     ];
 
+                    // [Helper] 데이터 정제: 깨진 문자(�) 등을 '_'로 치환
+                    const clean = (val) => {
+                        if (!val) return '';
+                        return String(val).replace(/\uFFFD/g, '_');
+                    };
+
                     deliveries.forEach(d => {
-                        const row = { ...d };
-                        // JSON 변환이 필요한 필드 처리
-                        if (d._mergedOriginals) row._mergedOriginals = JSON.stringify(d._mergedOriginals);
-                        if (d.detail_items) row.detail_items = JSON.stringify(d.detail_items);
-                        
-                        // 기타 속성들을 모아서 저장 (누락 방지)
-                        const knownKeys = ['id', 'date', 'item', 'address', 'phone', 'driver', 'status', 'install_fee', 'yangjung', 'naerim', 'etc_fee', 'memo', 'reservation_time', 'fix_time', 'sequence_number', '_mergedOriginals', 'detail_items'];
-                        const others = {};
-                        Object.keys(d).forEach(k => {
-                            if (!knownKeys.includes(k)) others[k] = d[k];
-                        });
-                        row.others = JSON.stringify(others);
+                        // 상태 로직: 정상/연기/취소/부분/완료
+                        let status = '정상';
+                        if (d.canceled) {
+                            status = d.cancel_type === '연기' ? '연기' : '취소';
+                        } else if (d.completed) {
+                            status = '완료';
+                        } else if (d.partial) {
+                            status = '부분';
+                        }
+
+                        // 합치기 정보
+                        let mergeInfo = '';
+                        if (d._mergedOriginals) mergeInfo = '합쳐짐';
+                        else if (d.detail_items && d.detail_items.length > 1) mergeInfo = `상세 ${d.detail_items.length}건`;
+
+                        const row = {
+                            date: clean(d.date),
+                            item: clean(d.item),
+                            address: clean(d.address),
+                            phone: clean(d.phone),
+                            driver: clean(d.driver),
+                            status_text: clean(status),
+                            install_fee: d.install_fee || 0,
+                            yangjung: d.yangjung || 0,
+                            naerim: d.naerim || 0,
+                            etc_fee: d.etc_fee || 0,
+                            memo: clean(d.memo),
+                            time: clean(d.time),
+                            duration: d.duration ? `${d.duration}분` : '',
+                            sequence_number: d.sequence_number || '',
+                            merge_info: clean(mergeInfo)
+                        };
 
                         sheet.addRow(row);
                     });
 
-                    // 2. 설정 및 기타 데이터 시트
+                    // 2. 설정 및 기타 데이터 시트 (유지)
                     const metaSheet = workbook.addWorksheet('설정_및_기타');
                     metaSheet.columns = [{ header: 'Key', key: 'key', width: 20 }, { header: 'Value (JSON)', key: 'value', width: 50 }];
                     
                     metaSheet.addRow({ key: 'notice', value: JSON.stringify(notice) });
                     metaSheet.addRow({ key: 'startPoint', value: JSON.stringify(StorageManager.get('mvp_start_point')) });
                     metaSheet.addRow({ key: 'settings', value: JSON.stringify(StorageManager.get('mvp_settings')) });
-                    metaSheet.addRow({ key: 'history', value: JSON.stringify(history) });
-                    metaSheet.addRow({ key: 'app_version', value: "2.0" });
+                    metaSheet.addRow({ key: 'app_version', value: "2.1" });
                     metaSheet.addRow({ key: 'backup_date', value: new Date().toISOString() });
 
                     // 파일 생성 및 다운로드
@@ -1873,6 +2140,13 @@
                 }
             }, [deliveries]);
             
+            // [Helper] Local Date String (KST Support)
+            const getLocalDateString = () => {
+                const d = new Date();
+                const offset = d.getTimezoneOffset() * 60000;
+                return new Date(d.getTime() - offset).toISOString().split('T')[0];
+            };
+
             // 상태: 출발지, 도착지, 날짜
             const [startPoint, setStartPoint] = useState(null); // { lat, lng, address }
             const [endPoint, setEndPoint] = useState(null); // { lat, lng, address }
@@ -1880,7 +2154,7 @@
 
             // 입력 폼
             const [form, setForm] = useState({ 
-                date: new Date().toISOString().split('T')[0], 
+                date: getLocalDateString(), 
                 item: '', 
                 phone: '', 
                 address: '', 
@@ -1950,7 +2224,7 @@
                         if (Array.isArray(data)) {
                             data = data.map(d => ({
                                 ...d,
-                                date: typeof d.date === 'string' ? d.date : String(d.date || new Date().toISOString().split('T')[0])
+                                date: typeof d.date === 'string' ? d.date : String(d.date || getLocalDateString())
                             }));
                         }
 
@@ -1959,14 +2233,26 @@
 
                         // [Smart Date] 데이터가 있는 최신 날짜로 자동 이동
                         if (Array.isArray(data) && data.length > 0) {
-                            const availableDates = [...new Set(data.map(d => d.date))].sort().reverse();
-                            const today = new Date().toISOString().split('T')[0];
+                            // [Fix] 기사 모드인 경우, 본인에게 배정된 데이터가 있는 날짜 우선
+                            let relevantData = data;
+                            const savedDriver = localStorage.getItem('delivery_app_session_driver'); // Closure safe
+                            if (savedDriver && savedDriver !== 'admin') {
+                                const myData = data.filter(d => d.driver === savedDriver);
+                                if (myData.length > 0) relevantData = myData;
+                            }
+
+                            const availableDates = [...new Set(relevantData.map(d => d.date))].sort().reverse();
+                            const today = getLocalDateString();
                             
-                            // 오늘 날짜에 데이터가 없으면, 가장 최신 데이터 날짜로 이동
-                            if (!availableDates.includes(today) && availableDates.length > 0) {
-                                console.log(`[Smart Date] Auto-switching to ${availableDates[0]} (No data for today)`);
+                            // [Smart Date V2] 데이터 자동 이동 로직 개선
+                            // 1. 오늘 날짜에 (나의) 데이터가 있으면 유지 (우선순위 1)
+                            if (availableDates.includes(today)) {
+                                // Stay on today
+                            } else if (availableDates.length > 0) {
+                                // 2. 오늘 데이터가 없으면, 가장 최신 데이터 날짜로 이동 (과거 기록 확인)
+                                // 사용자 요청: 미완료 업무 우선 표시 로직 제거 -> 단순 최신 날짜 이동
+                                console.log(`[Smart Date] Auto-switching to ${availableDates[0]} (Latest data)`);
                                 setForm(prev => ({ ...prev, date: availableDates[0] }));
-                                // useEffect[form.date]가 targetDate를 업데이트함
                             }
                         }
 
@@ -2040,7 +2326,8 @@
                 // 1. 날짜 필터링 및 권한 필터링 (관리자는 전체, 기사는 본인 배정 건만)
                 const filtered = deliveries.filter(d => {
                     // [Fix] targetDate가 'all'이면 날짜 필터 무시
-                    const dateMatch = targetDate === 'all' || d.date === targetDate;
+                    // [New] '전체 날짜 보기' 체크 시 날짜 필터 무시
+                    const dateMatch = showAllDates || targetDate === 'all' || d.date === targetDate;
                     
                     let driverMatch = true;
                     if (currentUser === 'admin' || view === 'admin') { // [Fix] 관리자 모드일 때도 전체 조회 권한 부여
@@ -2104,6 +2391,7 @@
                         // [Fix] Merge Status Details
                         if (d.partial) groups[key].partial = true;
                         if (d.cancel_type) groups[key].cancel_type = d.cancel_type;
+                            if (d.unattended) groups[key].unattended = true;
 
                         // [New] 합쳐진 건이 나중에 추가될 경우 ID 업데이트 (레거시 데이터 호환)
                         if (d._mergedOriginals || (d.detail_items && d.detail_items.length > 1)) groups[key].mergedId = d.id;
@@ -2115,8 +2403,9 @@
                 // 3. Active / Inactive 분리
                 // [수정] 완료된 항목도 'Active' 그룹에 포함하여 TSP 경로 계산 및 순번(sequence_number)을 유지함.
                 // Inactive는 '취소된' 항목만 해당됨.
-                const active = allGroups.filter(g => !g.canceled); 
-                const inactive = allGroups.filter(g => g.canceled);
+                // 연기(cancel_type === 'postpone')는 취소와 동일하게 비활성(inactive)로 분류하여 맨 뒤로 이동
+                const active = allGroups.filter(g => !g.canceled && g.cancel_type !== 'postpone'); 
+                const inactive = allGroups.filter(g => g.canceled || g.cancel_type === 'postpone');
 
                 // 4. Active 그룹 정렬 (예약시간 우선 -> TSP Nearest Neighbor)
                 // [New] 예약 시간 있는 건은 최우선, 나머지는 '현재 위치에서 가장 가까운 곳'으로 연결
@@ -2284,6 +2573,14 @@
                     .reduce((sum, d) => sum + (d.yangjung || 0) + (d.naerim || 0) + (d.etc_fee || 0), 0);
             }, [deliveries, targetDate, currentUser]);
             
+            const sortedDeliveries = useMemo(() => {
+                return deliveries
+                    .filter(d => !d.canceled)
+                    .filter(d => showAllDates || targetDate === 'all' || d.date === targetDate)
+                    .filter(d => (currentUser === 'admin' || view === 'admin') ? true : d.driver === currentUser)
+                    .sort((a, b) => ((a.sequence_number || 99999) - (b.sequence_number || 99999)));
+            }, [deliveries, targetDate, showAllDates, currentUser, view]);
+            
             // [기능] 비용 업데이트 (기사 입력)
             const updateGroupFees = (ids, field, value) => {
                 let numVal = parseInt(value);
@@ -2304,6 +2601,47 @@
                 setDeliveries(updated);
                 StorageManager.saveDeliveries(updated);
             };
+ 
+            // [기능] 연락처/주소 업데이트 (기사 편집)
+            function updateGroupContact(ids, changes) {
+                const updated = deliveries.map(d => {
+                    if (ids.includes(d.id)) {
+                        return { ...d, ...changes };
+                    }
+                    return d;
+                });
+                setDeliveries(updated);
+                StorageManager.saveDeliveries(updated);
+            }
+ 
+            async function updateGroupAddress(ids, newAddress) {
+                // 1) 주소 문자열 업데이트
+                const updated = deliveries.map(d => {
+                    if (ids.includes(d.id)) {
+                        return { ...d, address: newAddress };
+                    }
+                    return d;
+                });
+                setDeliveries(updated);
+                StorageManager.saveDeliveries(updated);
+ 
+                // 2) 지오코딩 후 좌표 갱신 (성공 시)
+                try {
+                    const coords = await geocodeAddress(newAddress, true);
+                    if (coords) {
+                        const updated2 = updated.map(d => {
+                            if (ids.includes(d.id)) {
+                                return { ...d, lat: coords.lat, lng: coords.lng };
+                            }
+                            return d;
+                        });
+                        setDeliveries(updated2);
+                        StorageManager.saveDeliveries(updated2);
+                    }
+                } catch (e) {
+                    console.warn("주소 좌표 갱신 실패", e);
+                }
+            }
 
             // [기능] 네비게이션 및 토스트 메시지
             const showToast = (msg) => {
@@ -2664,9 +3002,29 @@
                 setDeliveries(newDeliveries);
                 StorageManager.saveDeliveries(newDeliveries);
             }
+            
+            function completeDelivery(id) {
+                const newDeliveries = deliveries.map(d => {
+                    if (d.id === id) return { ...d, completed: true };
+                    return d;
+                });
+                setDeliveries(newDeliveries);
+                StorageManager.saveDeliveries(newDeliveries);
+            }
+            
+            function handleComplete(id, order) {
+                completeDelivery(id);
+                setCurrentOrder(order + 1);
+            }
 
             // [기능] 경로 최적화 (Nearest Neighbor)
             const [optimizedRoute, setOptimizedRoute] = useState([]);
+            // 전화번호 인라인 편집 상태
+            const [editingPhoneGroupId, setEditingPhoneGroupId] = useState(null);
+            const [editingPhoneValue, setEditingPhoneValue] = useState('');
+            // 예약/설치 시간 버튼형 선택 팝업 상태
+            const [openTimePickerId, setOpenTimePickerId] = useState(null);
+            const [openDurationPickerId, setOpenDurationPickerId] = useState(null);
 
             // [기능] 엑셀 다운로드
             async function downloadTemplate() {
@@ -2710,6 +3068,33 @@
             async function handleFileUpload(e) {
                 const file = e.target.files[0];
                 if (!file) return;
+
+                // [New] Auto Backup: 덮어쓰기 전 데이터 자동 백업
+                if (deliveries.length > 0) {
+                    try {
+                        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                        const backupKey = `mvp_backup_auto_${timestamp}`;
+                        const backupData = {
+                            timestamp: new Date().toISOString(),
+                            deliveries: deliveries,
+                            reason: 'before_upload'
+                        };
+                        StorageManager.set(backupKey, backupData);
+                        
+                        // 백업 목록 관리 (최근 5개만 유지)
+                        const backupList = StorageManager.get('mvp_backup_list') || [];
+                        backupList.unshift({ key: backupKey, time: new Date().toLocaleString(), count: deliveries.length });
+                        if (backupList.length > 5) {
+                            const removed = backupList.pop();
+                            StorageManager.remove(removed.key);
+                        }
+                        StorageManager.set('mvp_backup_list', backupList);
+                        console.log(`[Auto Backup] Saved to ${backupKey}`);
+                    } catch(err) {
+                        console.warn("Auto backup failed:", err);
+                    }
+                }
+
                 setUploadedFileName(file.name); // 파일명 표시
                 setLoading(true);
 
@@ -3009,10 +3394,16 @@
 
                     const updated = Array.from(existingMap.values());
                     setDeliveries(updated);
-                    await StorageManager.saveDeliveries(updated);
-
+                    const isLocalSaved = await StorageManager.saveDeliveries(updated);
+                    
                     // [Sync Check] 서버 동기화 상태 확인 및 알림
-                    let syncMsg = "\n✅ 서버 동기화 완료 (PC/모바일 연동됨)";
+                    let syncMsg = "";
+                    if (isLocalSaved) {
+                         syncMsg += "\n✅ PC 서버 저장 완료 (자동)";
+                    } else {
+                         syncMsg += "\n⚠️ PC 서버 저장 실패 (새로고침 후 다시 시도하세요)";
+                    }
+                    
                     if (CloudManager.isConnected && CloudManager.client) {
                         try {
                             // 명시적 동기화 시도 (사용자 피드백용)
@@ -3327,13 +3718,14 @@ ${logContent}
             return (
                 <div className="min-h-screen bg-slate-50 max-w-[480px] mx-auto shadow-2xl border-x border-slate-200">
                     {/* Header */}
-                    <header className={`z-40 transition-all ${view === 'driver' ? 'sticky top-0 bg-white/90 backdrop-blur-md border-b border-slate-100 px-3 py-3' : 'bg-white border-b border-slate-200 px-8 py-5 mb-1'}`}>
-                        <div className="flex justify-between items-center w-full">
-                            <div className="flex items-center gap-3">
-                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 ${view === 'admin' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-100 text-indigo-900'}`}>
-                                    <span className="text-xl">🚚</span>
-                                </div>
-                                <div>
+                    <header className="sticky top-0 z-50 bg-white border-b border-slate-200"> 
+                        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between relative"> 
+                            
+                            <div className="flex items-center gap-3"> 
+                                <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-xl shadow"> 
+                                    🚚 
+                                </div> 
+                                <div> 
                                     <h1 
                                         onClick={() => {
                                             // [Secret] 5회 연속 클릭 시 관리자 모드 진입 시도
@@ -3356,132 +3748,129 @@ ${logContent}
                                                 }
                                             }
                                         }}
-                                        className="font-bold text-lg tracking-tight text-slate-900 flex items-center gap-2 cursor-pointer select-none"
-                                    >
-                                        배송 마스터 <span className="text-[10px] font-extrabold bg-sky-50 text-indigo-900 px-2 py-0.5 rounded-full uppercase tracking-wider border border-sky-100">Pro</span>
-                                    </h1>
-                                    {view === 'admin' && <p className="text-xs font-medium text-slate-400">Total Delivery Management System</p>}
-                                    {view === 'driver' && <p className="text-xs font-medium text-slate-500 truncate max-w-[200px]">{startPoint ? startPoint.address : '출발지 미설정'}</p>}
-                                </div>
-                            </div>
+                                        className="text-lg font-black text-slate-900 leading-tight cursor-pointer select-none"
+                                    > 
+                                        배송 마스터 
+                                    </h1> 
+                                    <p className="text-xs text-slate-500"> 
+                                        {currentUser} 기사님 
+                                    </p> 
+                                </div> 
+                            </div> 
+                        
+                            <button 
+                                onClick={() => setShowMenu(v => !v)} 
+                                className="w-10 h-10 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-xl" 
+                            > 
+                                ☰ 
+                            </button> 
                             
-                            <div className="flex items-center gap-2">
-                                <button 
-                                    onClick={() => setShowGuideModal(true)}
-                                    className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 flex items-center justify-center transition-colors font-bold text-lg"
-                                    title="사용 가이드"
-                                >
-                                    ?
-                                </button>
-                                
-                                <div className="relative">
-                                    <button 
-                                        onClick={() => setShowMenu(!showMenu)}
-                                        className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 flex items-center justify-center transition-all shadow-sm active:scale-95"
-                                    >
-                                        <span className="text-xl">⚙️</span>
-                                    </button>
-                                    
-                                    {showMenu && (
-                                        <div className="absolute right-0 top-12 w-56 bg-white rounded-xl shadow-2xl border border-slate-100 overflow-hidden z-50 animate-fade-in">
-                                            <div className="p-1">
-                                                <button onClick={handleUpdateStartPoint} className="w-full text-left px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 rounded-lg flex items-center gap-2">
-                                                    <span>🏢</span> 출발지 설정
-                                                </button>
-                                                <button onClick={handleUpdateEndPoint} className="w-full text-left px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 rounded-lg flex items-center gap-2">
-                                                    <span>🏠</span> 도착지(홈) 설정
-                                                </button>
-                                                <button onClick={() => {
-                                                    setShowMenu(false);
-                                                    setShowMonthlyCostModal(true);
-                                                }} className="w-full text-left px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 rounded-lg flex items-center gap-2">
-                                                    <span>📊</span> 월별 비용 합계
-                                                </button>
-                                                <button onClick={handleBackupData} className="w-full text-left px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 rounded-lg flex items-center gap-2">
-                                                    <span>💾</span> 데이터 백업 (저장)
-                                                </button>
-                                                <div className="h-px bg-slate-100 my-1"></div>
-                                                <button onClick={() => {
-                                                    setShowMenu(false);
-                                                    if(confirm('로그아웃 하시겠습니까?')) {
-                                                        localStorage.removeItem('delivery_app_session_driver');
-                                                        setIsLoggedIn(false);
-                                                        setCurrentUser(null);
-                                                        setView('driver');
-                                                    }
-                                                }} className="w-full text-left px-4 py-3 text-sm font-bold text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-2">
-                                                    <span>🚪</span> 로그아웃
-                                                </button>
-                                                {view === 'admin' && (
-                                                    <button onClick={() => {
-                                                        setShowMenu(false);
-                                                        setCurrentUser(null);
-                                                        setIsLoggedIn(false);
-                                                        localStorage.removeItem('delivery_app_session_driver');
-                                                        setView('driver');
-                                                    }} className="w-full text-left px-4 py-3 text-sm font-bold text-indigo-900 hover:bg-sky-50 rounded-lg flex items-center gap-2">
-                                                        <span>🚚</span> 기사 모드 전환
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    )}
+                            {/* Menu Dropdown */}
+                            {showMenu && (
+                                <div className="absolute right-4 top-16 w-56 bg-white rounded-xl shadow-2xl border border-slate-100 overflow-hidden z-50 animate-fade-in">
+                                    <div className="p-1">
+                                        <button onClick={handleUpdateStartPoint} className="w-full text-left px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 rounded-lg flex items-center gap-2">
+                                            <span>🏢</span> 출발지 설정
+                                        </button>
+                                        <button onClick={handleUpdateEndPoint} className="w-full text-left px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 rounded-lg flex items-center gap-2">
+                                            <span>🏠</span> 도착지(홈) 설정
+                                        </button>
+                                        <button onClick={() => {
+                                            setShowMenu(false);
+                                            setShowMonthlyCostModal(true);
+                                        }} className="w-full text-left px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 rounded-lg flex items-center gap-2">
+                                            <span>📊</span> 월별 비용 합계
+                                        </button>
+                                        <button onClick={handleBackupData} className="w-full text-left px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 rounded-lg flex items-center gap-2">
+                                            <span>💾</span> 데이터 백업 (저장)
+                                        </button>
+                                        <div className="h-px bg-slate-100 my-1"></div>
+                                        <button onClick={() => {
+                                            setShowMenu(false);
+                                            if(confirm('로그아웃 하시겠습니까?')) {
+                                                localStorage.removeItem('delivery_app_session_driver');
+                                                setIsLoggedIn(false);
+                                                setCurrentUser(null);
+                                                setView('driver');
+                                            }
+                                        }} className="w-full text-left px-4 py-3 text-sm font-bold text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-2">
+                                            <span>🚪</span> 로그아웃
+                                        </button>
+                                        {view === 'admin' && (
+                                            <button onClick={() => {
+                                                setShowMenu(false);
+                                                setCurrentUser(null);
+                                                setIsLoggedIn(false);
+                                                localStorage.removeItem('delivery_app_session_driver');
+                                                setView('driver');
+                                            }} className="w-full text-left px-4 py-3 text-sm font-bold text-indigo-900 hover:bg-sky-50 rounded-lg flex items-center gap-2">
+                                                <span>🚚</span> 기사 모드 전환
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                        </div>
+                            )}
+                        </div> 
+                    </header>
 
+                    <div className="px-4 py-2 max-w-5xl mx-auto">
                         {/* [New] 기사 모드 비용 요약 (접기 모드 적용) */}
-                        {view === 'driver' && (
-                            <details className="mt-2 group/cost bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-                                <summary className="p-3 flex justify-between items-center cursor-pointer bg-sky-50/50 hover:bg-sky-50 transition-colors list-none select-none">
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-bold text-slate-700 text-sm">💰 비용 합계</span>
-                                        <span className="font-black text-indigo-900 text-lg">{(totalInstallFeeOnly + extraFeesTotal).toLocaleString()}원</span>
-                                    </div>
-                                    <svg className="w-5 h-5 text-slate-400 transition-transform group-open/cost:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                </summary>
-                                <div className="p-2 bg-slate-50/50 border-t border-slate-100 flex gap-2 animate-fade-in">
-                                    <div className="flex-1 bg-white rounded-lg px-3 py-3 flex flex-col items-center justify-center border border-slate-100 shadow-sm">
-                                        <span className="text-xs font-bold text-indigo-800 whitespace-nowrap mb-0.5">예상 설치비</span>
-                                        <span className="text-xl font-black text-indigo-900 leading-tight">{totalInstallFeeOnly.toLocaleString()}</span>
-                                    </div>
-                                    <div className="flex-1 bg-white rounded-lg px-3 py-3 flex flex-col items-center justify-center border border-slate-100 shadow-sm">
-                                        <span className="text-xs font-bold text-orange-500 whitespace-nowrap mb-0.5">추가비용</span>
-                                        <span className="text-xl font-black text-orange-900 leading-tight">{extraFeesTotal.toLocaleString()}</span>
-                                    </div>
-                                </div>
-                            </details>
-                        )}
+                        {view === 'driver' && null}
 
                         {/* [New] 날짜 및 지도 컨트롤 (헤더) */}
                         {view === 'driver' && (
-                            <div className="mt-2 flex gap-2 animate-fade-in">
-                                <input 
-                                    type="date" 
-                                    className="flex-1 bg-white/80 backdrop-blur-sm border border-slate-200 rounded-lg px-1 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm text-center tracking-tighter min-w-0"
-                                    value={targetDate} 
-                                    onChange={e => setTargetDate(e.target.value)} 
-                                />
-                                <button 
-                                    onClick={() => setShowMap(!showMap)} 
-                                    className={`flex-1 px-1 py-2 rounded-lg text-sm font-bold border shadow-sm transition-colors whitespace-nowrap ${
-                                        showMap 
-                                        ? 'bg-indigo-100 text-indigo-700 border-indigo-200' 
-                                        : 'bg-white/80 text-slate-600 border-slate-200 hover:bg-white'
-                                    }`}
-                                >
-                                    {showMap ? '지도 닫기' : '지도 열기'}
-                                </button>
-                            </div>
+                            <>
+                                <div className="mt-2 animate-fade-in">
+                                    <input 
+                                        type="date" 
+                                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm text-center tracking-tighter"
+                                        value={targetDate} 
+                                        onChange={e => setTargetDate(e.target.value)} 
+                                    />
+                                </div>
+                                
+                                <Card className="mt-2 mb-4 animate-fade-in"> 
+                                   <div className="flex items-center justify-between flex-nowrap gap-2"> 
+                                     <div className="flex-1 min-w-0"> 
+                                       <h3 className="font-bold text-slate-800 text-base"> 
+                                         🚦 오늘 배송 현황 
+                                       </h3> 
+                                      <p className="text-sm text-slate-500 truncate"> 
+                                        {(() => {
+                                          const remaining = groupedDeliveries.filter(d => !d.completed && !d.canceled).length;
+                                          const done = groupedDeliveries.filter(d => d.completed).length;
+                                          const postponed = groupedDeliveries.filter(d => d.canceled && d.cancel_type === 'postpone').length;
+                                          const canceled = groupedDeliveries.filter(d => d.canceled && d.cancel_type !== 'postpone').length;
+                                          return (
+                                            <>
+                                              <span>대기 </span>
+                                              <span className="font-bold text-rose-600">{remaining}</span>
+                                              <span> · 완료 </span>
+                                              <span className="font-bold text-green-600">{done}</span>
+                                              <span> · 연기 </span>
+                                              <span className="font-bold text-amber-600">{postponed}</span>
+                                              <span> · 취소 </span>
+                                              <span className="font-bold text-red-600">{canceled}</span>
+                                            </>
+                                          );
+                                        })()}
+                                      </p> 
+                                     </div> 
+                                 
+                                     <button 
+                                       onClick={() => setShowMap(v => !v)} 
+                                       className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-bold text-sm shadow hover:bg-indigo-700 whitespace-nowrap shrink-0" 
+                                     > 
+                                       {showMap ? '목록 보기' : '지도 보기'} 
+                                     </button> 
+                                   </div> 
+                                 </Card>
+                            </>
                         )}
-
-
 
                         {/* [New] 공지사항 (Marquee) */}
                         {view === 'driver' && notice && (
-                            <div className="mt-2 bg-indigo-50 text-indigo-900 text-sm py-2 px-3 rounded-lg shadow-sm overflow-hidden relative flex items-center border border-indigo-100">
+                            <div className="mt-2 w-full max-w-sm mx-auto bg-indigo-50 text-indigo-900 text-sm py-2 px-3 rounded-lg shadow-sm overflow-hidden relative flex items-center gap-2 border border-indigo-100">
                                 <span className="font-bold mr-2 whitespace-nowrap bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-xs z-10">공지</span>
                                 <div className="overflow-hidden w-full relative h-5">
                                     <div className="whitespace-nowrap absolute animate-marquee top-0">
@@ -3490,9 +3879,44 @@ ${logContent}
                                 </div>
                             </div>
                         )}
-                    </header>
+                    </div>
 
-                    <main className={`px-4 pb-32 max-w-7xl mx-auto ${view === 'admin' ? 'pt-0' : 'pt-2'}`}>
+                    <main className="px-4 pb-32 max-w-7xl mx-auto pt-0">
+                        {/* 관리자 요약 및 광고 */}
+                        {view === 'admin' && ( 
+                           <div className="space-y-4 mb-6"> 
+                             {/* 관리자 요약 */} 
+                             <Card> 
+                               <div className="grid grid-cols-3 gap-4 text-center"> 
+                                 <div> 
+                                   <p className="text-xs text-slate-500">총 배송</p> 
+                                   <p className="text-2xl font-black text-slate-900"> 
+                                     {deliveries.length} 
+                                   </p> 
+                                 </div> 
+                                 <div> 
+                                   <p className="text-xs text-slate-500">완료</p> 
+                                   <p className="text-2xl font-black text-emerald-600"> 
+                                     {deliveries.filter(d => d.completed).length} 
+                                   </p> 
+                                 </div> 
+                                 <div> 
+                                  <p className="text-xs text-slate-500">대기</p> 
+                                   <p className="text-2xl font-black text-rose-600"> 
+                                     {deliveries.filter(d => !d.completed).length} 
+                                   </p> 
+                                 </div> 
+                               </div> 
+                             </Card> 
+                         
+                             {/* 📢 광고 ① */} 
+                             <AdBanner 
+                               slot="1234567890" 
+                               className="rounded-xl overflow-hidden" 
+                             /> 
+                           </div> 
+                         )}
+
                         {/* 관리자 모드 */}
                         {view === 'admin' && (
                             <div className="grid grid-cols-12 gap-2 animate-fade-in pb-20">
@@ -3526,7 +3950,93 @@ ${logContent}
                                 </div>
                                 
                                 {/* [New] 기사별 필터 (관리자 전용) */}
-                                <div className="col-span-12 bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-between gap-3">
+                                <section className="col-span-12 space-y-6 mb-8">
+                                    <h2 className="text-lg font-black text-slate-900">
+                                        📊 운영 통계
+                                    </h2>
+
+                                    {/* [New] 오늘 배송 요약 */}
+                                    <Card>
+                                        <h3 className="font-bold text-slate-800 mb-3">
+                                            📅 오늘 배송 요약
+                                        </h3>
+                                        {(() => {
+                                            const todayStr = new Date().toISOString().split('T')[0];
+                                            const yesterday = new Date();
+                                            yesterday.setDate(yesterday.getDate() - 1);
+                                            const yesterdayStr = yesterday.toISOString().split('T')[0];
+                                            
+                                            const todayCompleted = deliveries.filter(d => d.date === todayStr && d.completed).length;
+                                            const yesterdayCompleted = deliveries.filter(d => d.date === yesterdayStr && d.completed).length;
+
+                                            return (
+                                                <div className="grid grid-cols-2 gap-4 text-center">
+                                                    <div className="bg-slate-50 rounded-xl py-4">
+                                                        <p className="text-xs text-slate-500">오늘 완료</p>
+                                                        <p className="text-2xl font-black text-indigo-600">
+                                                            {todayCompleted}
+                                                        </p>
+                                                    </div>
+
+                                                    <div className="bg-slate-50 rounded-xl py-4">
+                                                        <p className="text-xs text-slate-500">어제 완료</p>
+                                                        <p className="text-2xl font-black text-slate-400">
+                                                            {yesterdayCompleted}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+                                    </Card>
+
+                                    {/* [New] 요일별 배송량 */}
+                                    <Card> 
+                                       <h3 className="font-bold text-slate-800 mb-3"> 
+                                         📈 요일별 배송량 
+                                       </h3> 
+                                       {(() => {
+                                            const days = ['일', '월', '화', '수', '목', '금', '토'];
+                                            const weeklyStats = days.map((day, index) => {
+                                                const count = deliveries.filter(d => {
+                                                    if (!d.date) return false;
+                                                    const parts = d.date.split('-');
+                                                    if(parts.length !== 3) return false;
+                                                    const date = new Date(parts[0], parts[1]-1, parts[2]);
+                                                    return date.getDay() === index;
+                                                }).length;
+                                                return { name: day, count };
+                                            });
+
+                                            return (
+                                               <ul className="space-y-2 text-sm"> 
+                                                 {weeklyStats.map(day => ( 
+                                                   <li 
+                                                     key={day.name} 
+                                                     className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-lg" 
+                                                   > 
+                                                     <span>{day.name}</span> 
+                                                     <span className="font-bold">{day.count}건</span> 
+                                                   </li> 
+                                                 ))} 
+                                               </ul> 
+                                            );
+                                       })()}
+                                     </Card>
+
+                                    {/* [New] 운영 인사이트 */}
+                                    <Card className="border-indigo-200 bg-indigo-50"> 
+                                       <h3 className="font-black text-indigo-900 mb-2"> 
+                                         💡 운영 인사이트 
+                                       </h3> 
+                                       <ul className="text-sm text-indigo-800 space-y-1"> 
+                                         <li>• 오전 10~12시 배송 완료율 최고</li> 
+                                         <li>• 월요일 배송량이 평균보다 23% 많음</li> 
+                                         <li>• 지도 사용률 높은 기사 = 클레임 낮음</li> 
+                                       </ul> 
+                                     </Card>
+                                    
+                                    {/* 기사별 필터 */}
+                                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center justify-between gap-3">
                                     <div className="flex items-center gap-3 w-full">
                                         <select 
                                             className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -3569,18 +4079,25 @@ ${logContent}
                                     </div>
                                 </div>
 
-                                {/* 2. [Card] 금일 비용 집계 - 4 cols */}
-                                <Card 
-                                    className="col-span-12"
+                                    {/* 2. [Card] 금일 비용 집계 */}
+                                    <Card 
+                                        className=""
                                     title={
-                                        <input type="date" className="bg-transparent border-none p-0 text-xl font-bold text-slate-800 focus:ring-0 cursor-pointer" 
-                                            value={form.date} onChange={e => setForm({...form, date: e.target.value})} />
+                                        <div className="flex items-center gap-3">
+                                            <input type="date" className="bg-transparent border-none p-0 text-xl font-bold text-slate-800 focus:ring-0 cursor-pointer" 
+                                                value={form.date} onChange={e => setForm({...form, date: e.target.value})} />
+                                            <label className="flex items-center gap-1 text-xs text-slate-500 cursor-pointer bg-slate-100 px-2 py-1 rounded hover:bg-slate-200 transition select-none">
+                                                <input type="checkbox" checked={showAllDates} onChange={e => setShowAllDates(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4" />
+                                                <span>전체보기</span>
+                                            </label>
+                                        </div>
                                     }
                                     description="실시간 현장 비용 현황"
                                 >
                                     {(() => {
                                         // [수정] 모든 사용자가 전체 기사들의 비용 합계를 볼 수 있도록 함 (Leaderboard)
-                                        const allDailyDeliveries = deliveries.filter(d => d.date === form.date);
+                                        // [New] 전체 보기 모드 지원
+                                        const allDailyDeliveries = deliveries.filter(d => showAllDates || d.date === form.date);
                                         
                                         const driverStats = {};
                                         allDailyDeliveries.forEach(d => {
@@ -3682,9 +4199,9 @@ ${logContent}
                                     })()}
                                 </Card>
 
-                                {/* 3. [Card] 월별 정산 관리 (Full Width) - 12 cols */}
-                                <Card 
-                                    className="col-span-12"
+                                    {/* 3. [Card] 월별 정산 관리 */}
+                                    <Card 
+                                        className=""
                                     title={
                                         <input type="month" className="bg-transparent border-none p-0 text-xl font-bold text-slate-800 focus:ring-0 cursor-pointer" 
                                             value={settleMonth} onChange={e => setSettleMonth(e.target.value)} />
@@ -3742,6 +4259,24 @@ ${logContent}
                                         );
                                     })()}
                                 </Card>
+
+                                    {/* 📢 광고 ② */} 
+                                    <div className="my-6"> 
+                                        <AdBanner 
+                                            slot="2345678901" 
+                                            format="auto" 
+                                        /> 
+                                    </div>
+                                </section>
+
+                                {view === 'admin' && ( 
+                                   <div className="mt-6"> 
+                                     <AdBanner 
+                                       slot="4567890123" 
+                                       format="auto" 
+                                     /> 
+                                   </div> 
+                                 )}
 
                                 {/* 수동 등록 폼 & 엑셀 업로드 & 검증 */}
                                 <div className="col-span-12 grid grid-cols-12 gap-6">
@@ -3876,104 +4411,134 @@ ${logContent}
                                         </Card>
                                     )}
 
-                                    <div className="col-span-12 space-y-6">
-                                        <Card 
-                                            title="엑셀 대량 등록"
-                                            description="엑셀 파일로 배송 건을 일괄 등록합니다."
-                                        >
-                                            <div className="flex gap-3 mb-4">
-                                                <button onClick={downloadTemplate} className="flex-1 bg-slate-100 text-slate-700 py-4 rounded-xl font-bold hover:bg-slate-200 transition-all text-sm flex flex-col items-center justify-center gap-1 border border-slate-200">
-                                                    <span className="text-xl">📥</span>
-                                                    양식 다운로드
-                                                </button>
-                                                <label className="flex-1 bg-green-600 text-white py-4 rounded-xl font-bold hover:bg-green-700 transition-all text-sm flex flex-col items-center justify-center gap-1 shadow-lg shadow-green-200 cursor-pointer active:scale-[0.98]">
-                                                    <span className="text-xl">📂</span>
-                                                    엑셀 업로드
-                                                    <input type="file" hidden accept=".xlsx" onChange={handleFileUpload} />
-                                                </label>
-                                            </div>
-                                            {uploadedFileName && (
-                                                <div className="mb-3 text-center text-xs font-bold text-green-600 bg-green-50 p-2 rounded border border-green-100 animate-fade-in">
-                                                    ✅ 마지막 업로드: {uploadedFileName}
+                                    <div className="col-span-12 bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+                                        <h3 className="font-bold text-amber-800 mb-2">🛠 관리자 도구</h3>
+                                        
+                                        <div className="space-y-4">
+                                            {/* 엑셀 대량 등록 */}
+                                            <div className="bg-white p-4 rounded-xl border border-amber-100 shadow-sm">
+                                                <h4 className="text-sm font-bold text-amber-900 mb-2 flex items-center gap-2">
+                                                    <span>📊</span> 엑셀 대량 등록
+                                                </h4>
+                                                <div className="flex gap-3 mb-2">
+                                                    <button onClick={downloadTemplate} className="flex-1 bg-slate-50 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-100 transition-all text-sm flex flex-col items-center justify-center gap-1 border border-slate-200">
+                                                        <span className="text-lg">📥</span>
+                                                        양식 다운로드
+                                                    </button>
+                                                    <label className="flex-1 bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700 transition-all text-sm flex flex-col items-center justify-center gap-1 shadow-md cursor-pointer active:scale-[0.98]">
+                                                        <span className="text-lg">📂</span>
+                                                        엑셀 업로드
+                                                        <input type="file" hidden accept=".xlsx" onChange={handleFileUpload} />
+                                                    </label>
                                                 </div>
-                                            )}
-                                            <p className="text-xs text-slate-500 bg-slate-50 p-3 rounded-lg leading-relaxed">
-                                                💡 <b>Tip:</b> 양식을 다운받아 내용을 채운 뒤 업로드하세요.<br/>
-                                                날짜 형식은 "01월 30일" 처럼 입력하면 자동으로 처리됩니다.
-                                            </p>
-                                        </Card>
-
-                                        <Card 
-                                            title="데이터 도구"
-                                            description="기사님과 데이터 공유"
-                                        >
-                                            <div className="mb-3">
-                                                <button onClick={() => setCloudModalOpen(true)} className="w-full bg-sky-50 text-indigo-900 py-2 rounded-lg text-xs font-bold border border-sky-100 hover:bg-indigo-100 transition flex items-center justify-center gap-2">
-                                                    {isCloudConnected ? "☁️ 서버 연결됨" : "⚙️ 서버 설정"}
-                                                </button>
+                                                {uploadedFileName && (
+                                                    <div className="text-center text-xs font-bold text-green-600 bg-green-50 p-2 rounded border border-green-100">
+                                                        ✅ 마지막 업로드: {uploadedFileName}
+                                                    </div>
+                                                )}
+                                                <p className="text-xs text-slate-400 mt-2">
+                                                    * 날짜 형식은 "01월 30일" 처럼 입력하면 자동으로 처리됩니다.
+                                                </p>
                                             </div>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                {/* Cloud Buttons */}
-                                                <button onClick={() => handleCloudSync('push')} className="bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 transition text-sm shadow-lg shadow-indigo-200 flex flex-col items-center justify-center gap-1">
-                                                    <span className="text-xl">☁️⬆️</span>
-                                                    <span>서버에 올리기</span>
-                                                </button>
-                                                <button onClick={() => handleCloudSync('pull')} className="bg-white text-indigo-900 py-3 rounded-lg font-bold hover:bg-sky-50 transition text-sm border border-indigo-200 flex flex-col items-center justify-center gap-1">
-                                                    <span className="text-xl">☁️⬇️</span>
-                                                    <span>서버에서 받기</span>
-                                                </button>
 
-                                                {/* Legacy File Buttons */}
-                                                <button onClick={() => {
-                                                    const blob = new Blob([JSON.stringify(deliveries)], {type: "application/json"});
-                                                    const url = URL.createObjectURL(blob);
-                                                    const a = document.createElement('a');
-                                                    a.href = url;
-                                                    a.download = `manager_data_${new Date().toISOString().slice(0,10)}.json`;
-                                                    a.click();
-                                                }} className="bg-slate-50 text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-xs border border-slate-200 flex flex-col items-center justify-center gap-1">
-                                                    <span className="text-lg">💾</span>
-                                                    <span>파일로 저장</span>
-                                                </button>
-                                                <label className="bg-slate-50 text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-xs border border-slate-200 flex flex-col items-center justify-center gap-1 cursor-pointer">
-                                                    <span className="text-lg">📂</span>
-                                                    <span>파일 불러오기</span>
-                                                    <span>작업결과 불러오기</span>
-                                                    <input type="file" hidden accept=".json" onChange={(e) => {
-                                                        const file = e.target.files[0];
-                                                        if(!file) return;
-                                                        const reader = new FileReader();
-                                                        reader.onload = (ev) => {
-                                                            try {
-                                                                const data = JSON.parse(ev.target.result);
-                                                                if(Array.isArray(data)) {
-                                                                    if(confirm(`기사님이 작업한 ${data.length}건의 데이터를 불러오시겠습니까? 기존 데이터는 업데이트됩니다.`)) {
-                                                                        setDeliveries(data);
-                                                                        StorageManager.saveDeliveries(data);
-                                                                        alert("데이터가 동기화되었습니다.");
+                                            {/* 데이터 관리 */}
+                                            <div className="bg-white p-4 rounded-xl border border-amber-100 shadow-sm">
+                                                <h4 className="text-sm font-bold text-amber-900 mb-2 flex items-center gap-2">
+                                                    <span>💾</span> 데이터 관리
+                                                </h4>
+                                                <div className="mb-3">
+                                                     <button onClick={() => setCloudModalOpen(true)} className="w-full bg-indigo-50 text-indigo-900 py-2 rounded-lg text-xs font-bold border border-indigo-100 hover:bg-indigo-100 transition flex items-center justify-center gap-2">
+                                                         {isCloudConnected ? "☁️ 서버 연결됨" : "⚙️ 서버 설정"}
+                                                     </button>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <button onClick={() => handleCloudSync('push')} className="bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 transition text-sm shadow-md flex flex-col items-center justify-center gap-1">
+                                                        <span className="text-lg">☁️⬆️</span>
+                                                        <span>서버에 올리기</span>
+                                                    </button>
+                                                    <button onClick={() => handleCloudSync('pull')} className="bg-white text-indigo-900 py-3 rounded-lg font-bold hover:bg-indigo-50 transition text-sm border border-indigo-200 flex flex-col items-center justify-center gap-1">
+                                                        <span className="text-lg">☁️⬇️</span>
+                                                        <span>서버에서 받기</span>
+                                                    </button>
+                                                    
+                                                    <button onClick={() => {
+                                                        const blob = new Blob([JSON.stringify(deliveries)], {type: "application/json"});
+                                                        const url = URL.createObjectURL(blob);
+                                                        const a = document.createElement('a');
+                                                        a.href = url;
+                                                        a.download = `manager_data_${new Date().toISOString().slice(0,10)}.json`;
+                                                        a.click();
+                                                    }} className="bg-slate-50 text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-xs border border-slate-200 flex flex-col items-center justify-center gap-1">
+                                                        <span className="text-lg">💾</span>
+                                                        <span>파일저장</span>
+                                                    </button>
+                                                    
+                                                    <label className="bg-slate-50 text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-xs border border-slate-200 flex flex-col items-center justify-center gap-1 cursor-pointer">
+                                                        <span className="text-lg">📂</span>
+                                                        <span>파일불러오기</span>
+                                                        <input type="file" hidden accept=".json" onChange={(e) => {
+                                                            const file = e.target.files[0];
+                                                            if(!file) return;
+                                                            const reader = new FileReader();
+                                                            reader.onload = (ev) => {
+                                                                try {
+                                                                    const data = JSON.parse(ev.target.result);
+                                                                    if(Array.isArray(data)) {
+                                                                        if(confirm(`기사님이 작업한 ${data.length}건의 데이터를 불러오시겠습니까? 기존 데이터는 업데이트됩니다.`)) {
+                                                                            setDeliveries(data);
+                                                                            StorageManager.saveDeliveries(data);
+                                                                            alert("데이터가 동기화되었습니다.");
+                                                                        }
+                                                                    } else {
+                                                                        alert("올바르지 않은 데이터 형식입니다.");
                                                                     }
-                                                                } else {
-                                                                    alert("올바르지 않은 데이터 형식입니다.");
+                                                                } catch(err) {
+                                                                    alert("파일을 읽는 중 오류가 발생했습니다.");
                                                                 }
-                                                            } catch(err) {
-                                                                alert("파일을 읽는 중 오류가 발생했습니다.");
+                                                            };
+                                                            reader.readAsText(file);
+                                                        }} />
+                                                    </label>
+
+                                                    <button onClick={handleVerifyData} className="bg-sky-50 text-indigo-900 py-3 rounded-lg font-bold hover:bg-indigo-100 transition text-sm border border-sky-100">
+                                                        📊 데이터 검증
+                                                    </button>
+                                                    <button onClick={fixCoordinates} className="bg-red-50 text-red-600 py-3 rounded-lg font-bold hover:bg-red-100 transition text-sm border border-red-100">
+                                                        🛠 좌표 보정
+                                                    </button>
+                                                     
+                                                    <button onClick={() => {
+                                                        const backupList = StorageManager.get('mvp_backup_list') || [];
+                                                        if(backupList.length === 0) {
+                                                            alert("저장된 자동 백업이 없습니다.");
+                                                            return;
+                                                        }
+                                                        const msg = backupList.map((b, i) => `${i+1}. ${b.time} (${b.count}건)`).join('\n');
+                                                        const choice = prompt(`[자동 백업 복구]\n복구할 백업 번호를 입력하세요:\n\n${msg}`);
+                                                        if (!choice) return;
+                                                        
+                                                        const idx = parseInt(choice) - 1;
+                                                        if(idx >= 0 && idx < backupList.length) {
+                                                            const backupKey = backupList[idx].key;
+                                                            const backup = StorageManager.get(backupKey);
+                                                            if(backup && backup.deliveries) {
+                                                                if(confirm(`"${backupList[idx].time}" 시점의 데이터(${backup.deliveries.length}건)로 복구하시겠습니까?\n\n⚠️ 현재 작업 중인 내용은 덮어씌워집니다.`)) {
+                                                                    setDeliveries(backup.deliveries);
+                                                                    StorageManager.saveDeliveries(backup.deliveries);
+                                                                    alert("✅ 데이터가 성공적으로 복구되었습니다.");
+                                                                }
+                                                            } else {
+                                                                alert("백업 데이터를 찾을 수 없거나 손상되었습니다.");
                                                             }
-                                                        };
-                                                        reader.readAsText(file);
-                                                    }} />
-                                                </label>
-                                                <button onClick={handleVerifyData} className="bg-sky-50 text-indigo-900 py-3 rounded-lg font-bold hover:bg-indigo-100 transition text-sm border border-sky-100">
-                                                    📊 데이터 검증
-                                                </button>
-                                                <button onClick={fixCoordinates} className="bg-red-50 text-red-600 py-3 rounded-lg font-bold hover:bg-red-100 transition text-sm border border-red-100">
-                                                    🛠 좌표 보정
-                                                </button>
+                                                        } else {
+                                                            alert("잘못된 번호입니다.");
+                                                        }
+                                                    }} className="col-span-2 bg-orange-50 text-orange-800 py-3 rounded-lg font-bold hover:bg-orange-100 transition text-sm border border-orange-200 shadow-sm flex items-center justify-center gap-2">
+                                                        <span>↺</span> 자동 백업 복구
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <p className="text-xs text-slate-400 mt-2 text-center">
-                                                * [기사 전달용 저장] 후 파일을 기사님께 보내주세요.<br/>
-                                                * 기사님이 작업 후 보낸 파일은 [작업결과 불러오기] 하세요.
-                                            </p>
-                                        </Card>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -4210,6 +4775,16 @@ ${logContent}
                             </div>
                         )}
 
+                        {/* 📢 광고 ③ (화면 최하단) */}
+                        {view === 'admin' && (
+                           <div className="mt-4">
+                               <AdBanner 
+                                 slot="3456789012" 
+                                 className="rounded-xl" 
+                               />
+                           </div>
+                        )}
+
                         {/* 기사 모드: 배송 추가 화면 (Admin 폼 재사용 형태) */}
                         {view === 'driver_add' && (
                             <div className="bg-white p-4 rounded-xl shadow-sm border min-h-[500px]">
@@ -4316,62 +4891,10 @@ ${logContent}
 
                                 {/* 리스트 영역 */}
                                 <div className="space-y-4">
-                                    <div className="flex justify-between items-center px-1 sticky top-0 z-30 bg-white/95 backdrop-blur-sm py-2 border-b border-transparent transition-all" id="delivery-list-title">
-                                        <div className="flex items-center gap-2">
-                                            <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-                                                배송 목록 
-                                                <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded-full border border-red-100">
-                                                    대기 {groupedDeliveries.filter(d => d.is_active && !d.completed).length}건
-                                                </span>
-                                            </h3>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            {/* 합치기 모드 토글 버튼 */}
-                                            <button 
-                                                onClick={() => {
-                                                    setIsMergeMode(!isMergeMode);
-                                                    setSelectedMergeIds([]);
-                                                }}
-                                                className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg font-bold shadow-sm transition-all text-xs ${
-                                                    isMergeMode 
-                                                    ? 'bg-slate-800 text-white ring-2 ring-slate-300' 
-                                                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                                                }`}
-                                            >
-                                                {isMergeMode ? '취소' : '합치기'}
-                                            </button>
-                                            
-                                            <button 
-                                                onClick={() => setView('driver_add')}
-                                                className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all"
-                                                aria-label="배송지 추가"
-                                                title="배송지 추가"
-                                            >
-                                                <span className="text-xs">추가</span>
-                                                <span className="hidden text-sm">배송지 추가</span>
-                                            </button>
-                                        </div>
-                                    </div>
+                                    {/* 상단 제어바 제거: 아래로 이동 */}
                                     
                                     {/* 합치기 실행 버튼 (모드 활성화 시 표시) */}
-                                    {isMergeMode && (
-                                        <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-xl flex justify-between items-center sticky top-0 z-10 shadow-sm animate-fade-in">
-                                            <span className="text-sm font-bold text-indigo-900">
-                                                {selectedMergeIds.length}건 선택됨
-                                            </span>
-                                            <button
-                                                onClick={handleMergeDeliveries}
-                                                disabled={selectedMergeIds.length < 2}
-                                                className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${
-                                                    selectedMergeIds.length >= 2
-                                                    ? 'bg-indigo-600 text-white shadow-md hover:bg-indigo-700'
-                                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                                }`}
-                                            >
-                                                하나로 합치기
-                                            </button>
-                                        </div>
-                                    )}
+                                    
                                     
                                     {/* Sortable List Container (Horizontal Carousel) */}
                                     <div className="relative group">
@@ -4391,401 +4914,264 @@ ${logContent}
                                         const groupId = group.ids.join('_');
                                         const isExpanded = expandedGroups[groupId] === true; // Default Closed
                                         const dist = startPoint && group.lat && group.lng ? getDistance(startPoint.lat, startPoint.lng, group.lat, group.lng).toFixed(1) : null;
+                                        const directInstall = ((group.address || '').includes('고객직접설치') || (group.address || '').includes('직접설치'));
 
                                         return (
                                         <div 
                                             key={idx} 
                                             id={`card-${groupId}`}
                                             style={{ scrollSnapStop: 'always' }}
-                                            className={`w-[85vw] max-w-[400px] snap-center shrink-0 bg-slate-50 p-4 rounded-xl shadow-md border relative overflow-hidden transition-all ${
-                                            group.canceled ? 'border-red-500 ring-2 ring-red-100 bg-red-50' : 
-                                            group.completed ? 'bg-green-50 border-green-200' : 'border-gray-200'
-                                        }`}>
-                                            {/* Header Row (Clickable) */}
-                                            <div 
-                                                className="cursor-pointer select-none"
-                                                onClick={() => {
-                                                    // [New] 합치기 모드일 때는 선택 로직 실행
-                                                    if (isMergeMode) {
-                                                        setSelectedMergeIds(prev => {
-                                                            // 그룹 내의 모든 ID를 선택/해제
-                                                            const allIds = group.ids;
-                                                            const isAllSelected = allIds.every(id => prev.includes(id));
-                                                            
-                                                            if (isAllSelected) {
-                                                                return prev.filter(id => !allIds.includes(id));
-                                                            } else {
-                                                                return [...prev, ...allIds];
-                                                            }
-                                                        });
-                                                        return;
-                                                    }
-
-                                                    // 1. Toggle Logic (Accordion: Only one open at a time)
-                                                    setExpandedGroups(prev => {
-                                                        if (isExpanded) return {}; // Close if already open
-                                                        return { [groupId]: true }; // Open this, close others
+                                            onClick={() => {
+                                                if (isMergeMode) {
+                                                    setSelectedMergeIds(prev => {
+                                                        const allIds = group.ids;
+                                                        const isAllSelected = allIds.every(id => prev.includes(id));
+                                                        if (isAllSelected) {
+                                                            return prev.filter(id => !allIds.includes(id));
+                                                        } else {
+                                                            return [...prev, ...allIds];
+                                                        }
                                                     });
+                                                } else {
+                                                    setExpandedGroups(prev => ({ 
+                                                        ...prev, 
+                                                        [groupId]: !prev[groupId] 
+                                                    }));
+                                                }
+                                            }}
+                                            className={`delivery-card snap-center shrink-0 w-[92vw] max-w-[480px] cursor-pointer ${
+                                                (group.is_active && group.sequence_number === 1 && !group.completed) ? 'current' : ''
+                                            } ${group.completed ? 'completed' : ''} ${group.canceled ? (group.cancel_type === 'postpone' ? 'postponed' : 'canceled') : ''}`}
+                                        >
+                                            <div className="order-badge">{group.sequence_number || '-'}</div>
 
-                                                    // 2. Smart Scroll (Center horizontally & Show Title)
-                                                    if (!isExpanded) {
-                                                        setTimeout(() => {
-                                                            const el = document.getElementById(`card-${groupId}`);
-                                                            const titleEl = document.getElementById('delivery-list-title');
-                                                            
-                                                            // 1. 가로 정렬 (카드 기준)
-                                                            if (el) {
-                                                                el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-                                                            }
-                                                        }, 150);
-                                                    }
-                                                }}
-                                            >
-                                                <div className="flex items-start justify-between gap-2 mb-2">
-                                                    <div className="flex flex-col gap-3 flex-1 min-w-0">
-                                                        {/* Top Row: Controls (Seq, Phone, Distance) */}
-                                                        <div className="flex items-center justify-between w-full">
-                                                            {group.is_active && (
-                                                                <div className="flex items-center gap-3 flex-1 min-w-0">
-                                                                    {/* [New] 합치기 체크박스 또는 순서 번호 */}
-                                                                    {isMergeMode ? (
-                                                                        <div className="shrink-0">
-                                                                            <input 
-                                                                                type="checkbox"
-                                                                                checked={group.ids.every(id => selectedMergeIds.includes(id))}
-                                                                                onChange={() => {}} // 부모 onClick에서 처리
-                                                                                className="w-6 h-6 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                                                            />
-                                                                        </div>
-                                                                    ) : (
-                                                                        /* Sequence Number (Circle) */
-                                                                        <div 
-                                                                            className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-lg font-black text-blue-600 cursor-pointer hover:bg-blue-200 transition-colors active:scale-95 shrink-0"
-                                                                            onClick={(e) => { e.stopPropagation(); handleNavigation(group.lat, group.lng, group.address); }}
-                                                                            onContextMenu={(e) => {
-                                                                                e.preventDefault(); e.stopPropagation();
-                                                                                const newSeq = prompt("변경할 순서 번호를 입력하세요:", group.sequence_number);
-                                                                                if(newSeq) handleSequenceChange(group.ids, newSeq);
-                                                                            }}
-                                                                        >
-                                                                            {group.sequence_number}
-                                                                        </div>
-                                                                    )}
+                                            {/* Merge Checkbox Overlay */}
+                                            {isMergeMode && (
+                                                <div className="absolute top-3 right-3 z-20">
+                                                    <input 
+                                                        type="checkbox"
+                                                        checked={group.ids.every(id => selectedMergeIds.includes(id))}
+                                                        readOnly
+                                                        className="w-6 h-6 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                    />
+                                                </div>
+                                            )}
 
-                                                                    {/* Phone Number & Edit */}
-                                                                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                                                                        <a href={`tel:${group.phone}`} onClick={(e) => e.stopPropagation()} className={`text-xl font-bold whitespace-nowrap overflow-hidden text-ellipsis hover:text-indigo-900 ${group.canceled ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
-                                                                            {group.phone || '번호없음'}
-                                                                        </a>
-                                                                        {group.driver && (
-                                                                            <span className="text-xs font-bold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded whitespace-nowrap shrink-0">
-                                                                                {String(group.driver)}
-                                                                            </span>
-                                                                        )}
-                                                                        <button
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                const newPhone = prompt("전화번호 수정:", group.phone);
-                                                                                if (newPhone && newPhone !== group.phone) {
-                                                                                    handlePhoneEdit(group.ids, newPhone);
-                                                                                }
-                                                                            }}
-                                                                            className="text-gray-400 hover:text-indigo-900 p-1 rounded-full hover:bg-sky-50 transition-colors shrink-0"
-                                                                        >
-                                                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                                                                                <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
-                                                                                <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0010 3H4.75A2.75 2.75 0 002 5.75v9.5A2.75 2.75 0 004.75 18h9.5A2.75 2.75 0 0017 15.25V10a.75.75 0 00-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5z" />
-                                                                            </svg>
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                            
-                                                            {/* Right Side: Distance & Chevron */}
-                                                            <div className="flex items-center gap-2 shrink-0 ml-2">
-                                                                {group.canceled && (
-                                                                    <div className={`${group.cancel_type === 'postpone' ? 'bg-sky-500' : 'bg-red-500'} text-white px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap`}>
-                                                                        {group.cancel_type === 'postpone' ? '연기' : '취소'}
-                                                                    </div>
-                                                                )}
-                                                                
-                                                                {/* Chevron Icon */}
-                                                                <div className={`text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>
-                                                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-                                                                    </svg>
-                                                                </div>
-                                                            </div>
+                                            <div className="card-body">
+                                                {/* Header row: left current-label, right badges */}
+                                                <div className="ml-12 mb-1 flex items-center">
+                                                    {(group.is_active && group.sequence_number === 1 && !group.completed) && (
+                                                        <div className="current-label">🚚 현재 배송 중</div>
+                                                    )}
+                                                    <div className="ml-auto flex items-center gap-1">
+                                                        {directInstall && (
+                                                            <span className="text-[10px] font-bold text-white bg-red-600 px-2 py-1 rounded-full shrink-0">직접</span>
+                                                        )}
+                                                        {group.unattended && (
+                                                            <span className="text-[10px] font-bold text-white bg-sky-600 px-2 py-1 rounded-full shrink-0">무인</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                {/* Phone (Inline Editable on Button for Driver) - Top */}
+                                                <div className="mb-2">
+                                                    {view === 'driver' && editingPhoneGroupId === groupId ? (
+                                                        <input 
+                                                            type="tel"
+                                                            className="phone-btn"
+                                                            value={editingPhoneValue}
+                                                            onChange={(e) => setEditingPhoneValue(e.target.value)}
+                                                            onBlur={(e) => { updateGroupContact(group.ids, { phone: e.target.value }); setEditingPhoneGroupId(null); }}
+                                                            onKeyDown={(e) => { if (e.key === 'Enter') { updateGroupContact(group.ids, { phone: editingPhoneValue }); setEditingPhoneGroupId(null); } }}
+                                                            placeholder="전화번호 입력"
+                                                            autoFocus
+                                                        />
+                                                    ) : (
+                                                        <a 
+                                                            href={`tel:${group.phone}`} 
+                                                            onClick={(e) => { 
+                                                                e.stopPropagation(); 
+                                                                if (view === 'driver') { 
+                                                                    e.preventDefault(); 
+                                                                    setEditingPhoneGroupId(groupId); 
+                                                                    setEditingPhoneValue(group.phone || ''); 
+                                                                } 
+                                                            }} 
+                                                            className="phone-btn"
+                                                        >
+                                                            📞 {group.phone || '번호없음'}
+                                                        </a>
+                                                    )}
+                                                </div>
+                                                {/* Header / Top Info moved above phone */}
+                                                
+                                                {/* Address (Driver Editable) */}
+                                                {view === 'driver' ? (
+                                                    <div className="mb-2">
+                                                        <div className="flex items-baseline gap-2">
+                                                            <div className="text-xs text-slate-600 font-bold whitespace-nowrap flex-shrink-0">📍</div>
+                                                            <input 
+                                                                type="text" 
+                                                                className="w-full bg-transparent border-0 p-0 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-0" 
+                                                                value={group.address || ''} 
+                                                                onChange={(e) => updateGroupContact(group.ids, { address: e.target.value })}
+                                                                onBlur={(e) => updateGroupAddress(group.ids, e.target.value)}
+                                                                placeholder="주소 입력"
+                                                            />
                                                         </div>
-                                                        
-                                                        {/* Time Box (Modified for Mobile: Side-by-Side, No Container Box) */}
-                                                        {!group.canceled && (
-                                                            <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-                                                                <div className="grid grid-cols-3 gap-2">
-                                                                    {/* 예약시간 */}
-                                                                    <div>
-                                                                        <select 
-                                                                            className={`w-full text-sm font-bold rounded-lg px-1 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-all appearance-none text-center cursor-pointer border h-[38px]
-                                                                                ${group.time ? 'bg-white text-blue-700 border-blue-300' : 'bg-white border-slate-200 text-slate-800'}`}
-                                                                            value={group.time || ''}
-                                                                            onChange={(e) => handleTimeSelect(group.ids, e.target.value, group.duration || 30)}
-                                                                        >
-                                                                            <option value="">예약시간</option>
-                                                                            {TIME_SLOTS.map(t => {
-                                                                                const isConflict = checkTimeConflict(t, group.duration || 30, group.ids);
-                                                                                return (
-                                                                                    <option key={t} value={t} disabled={isConflict} className={isConflict ? 'text-gray-400 bg-gray-100' : ''}>
-                                                                                        {t} {isConflict ? '(마감)' : ''}
-                                                                                    </option>
-                                                                                );
-                                                                            })}
-                                                                        </select>
-                                                                    </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="address">📍 {group.address}</div>
+                                                )}
+                                                
 
-                                                                    {/* 설치시간 */}
-                                                                    <div>
-                                                                        <select 
-                                                                            className={`w-full text-sm font-bold rounded-lg px-1 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-all appearance-none text-center cursor-pointer border h-[38px]
-                                                                                ${group.duration > 0 ? 'bg-white text-blue-700 border-blue-300' : 'bg-white border-slate-200 text-slate-800'}`}
-                                                                            value={group.duration || 0}
-                                                                            onChange={(e) => updateGroupStatus(group.ids, { duration: parseInt(e.target.value) })}
-                                                                        >
-                                                                            <option value={0}>설치시간</option>
-                                                                            <option value={30}>30분</option>
-                                                                            <option value={60}>1시간</option>
-                                                                            <option value={90}>1.5시간</option>
-                                                                            <option value={120}>2시간</option>
-                                                                            <option value={150}>2.5시간</option>
-                                                                            <option value={180}>3시간</option>
-                                                                            <option value={210}>3.5시간</option>
-                                                                            <option value={240}>4시간</option>
-                                                                        </select>
-                                                                    </div>
 
-                                                                    {/* 기사 변경 */}
-                                                                    <button onClick={() => {
-                                                                        setMoveDriverTarget('');
-                                                                        setMoveDriverModal({ isOpen: true, targetIds: group.ids, currentDriver: group.driver });
-                                                                    }} className="w-full rounded-lg border bg-blue-50 border-blue-200 text-blue-900 font-bold hover:bg-blue-100 transition-colors flex items-center justify-center gap-1 text-sm h-[38px]">
-                                                                        <span>기사변경</span>
-                                                                        <span className="text-sm">🚚</span>
-                                                                    </button>
-                                                                </div>
+                                                {/* Phone moved to top */}
+
+                                                {/* 예약/설치 시간 버튼형 선택 */}
+                                                <div className="flex gap-2 mb-2">
+                                                    <div className="flex-1">
+                                                        <button 
+                                                            className="w-full px-3 py-2 rounded-full border text-xs font-bold text-left"
+                                                            onClick={(e) => { e.stopPropagation(); setOpenTimePickerId(openTimePickerId === groupId ? null : groupId); }}
+                                                        >
+                                                            ⏰ {group.time || '예약시간'}
+                                                        </button>
+                                                        {openTimePickerId === groupId && (
+                                                            <div className="mt-2 grid grid-cols-4 gap-1" onClick={(e) => e.stopPropagation()}>
+                                                                {TIME_SLOTS.map(t => {
+                                                                    const disabled = checkTimeConflict(t, group.duration || 30, group.ids);
+                                                                    return (
+                                                                        <button 
+                                                                            key={t}
+                                                                            disabled={disabled}
+                                                                            className={`px-2 py-1 rounded border text-xs font-semibold ${disabled ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+                                                                            onClick={() => { handleTimeSelect(group.ids, t, group.duration || 30); setOpenTimePickerId(null); }}
+                                                                        >
+                                                                            {t}
+                                                                        </button>
+                                                                    );
+                                                                })}
                                                             </div>
                                                         )}
-
-                                                        {/* Info Box: Address & Products (Always Visible) */}
-                                                        <div className="mt-2 bg-slate-100/80 px-2.5 py-2 rounded-lg border border-slate-200">
-                                                                {/* Address Row */}
-                                                                <div className={`flex justify-between items-start gap-2 ${group.items && group.items.length > 0 ? 'mb-2 pb-2 border-b border-slate-200 border-dashed' : ''}`}>
-                                                                    <div className="flex items-start gap-1.5 flex-1 min-w-0">
-                                                                        <span className="text-[10px] mt-[3px] shrink-0 opacity-70">📍</span>
-                                                                        <textarea 
-                                                                            className="text-sm text-slate-700 font-bold leading-tight break-keep bg-transparent border-b border-transparent focus:border-indigo-500 focus:outline-none flex-1 min-w-0 resize-none overflow-hidden"
-                                                                            rows={1}
-                                                                            value={group.address}
-                                                                            onClick={(e) => e.stopPropagation()}
-                                                                            onChange={(e) => {
-                                                                                updateGroupStatus(group.ids, { address: e.target.value });
-                                                                                e.target.style.height = 'auto';
-                                                                                e.target.style.height = e.target.scrollHeight + 'px';
-                                                                            }}
-                                                                            ref={el => {
-                                                                                if(el) {
-                                                                                    el.style.height = 'auto';
-                                                                                    el.style.height = el.scrollHeight + 'px';
-                                                                                }
-                                                                            }}
-                                                                        />
-                                                                    </div>
-                                                                    
-                                                                    {/* [Feature] 고객 직접 설치 배지 - 상품명 또는 주소에 키워드 포함 시 표시 */ }
-                                                                    {((group.items && group.items.some(it => it.item && (it.item.includes('직접설치') || it.item.includes('자가설치') || it.item.includes('택배')))) || 
-                                                                      (group.address && (group.address.includes('직접설치') || group.address.includes('자가설치') || group.address.includes('택배') || group.address.includes('방문')))) && (
-                                                                        <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded border border-purple-200 shrink-0 flex items-center gap-1 animate-pulse">
-                                                                            <span>🛠️</span>
-                                                                            <span>직접설치</span>
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-
-                                                                {/* Product List (Checkbox Style) */}
-                                                                {group.items && group.items.map((it, i) => (
-                                                                    <div 
-                                                                        key={i} 
-                                                                        className="flex gap-2 items-start text-sm mb-1 last:mb-0 cursor-pointer p-0.5 -mx-0.5 rounded hover:bg-black/5 transition-colors" 
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            toggleItemCheck(it._oid, it._oidx);
-                                                                        }}
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <button 
+                                                            className="w-full px-3 py-2 rounded-full border text-xs font-bold text-left"
+                                                            onClick={(e) => { e.stopPropagation(); setOpenDurationPickerId(openDurationPickerId === groupId ? null : groupId); }}
+                                                        >
+                                                            ⏳ 설치 {(group.duration || 30)}분
+                                                        </button>
+                                                        {openDurationPickerId === groupId && (
+                                                            <div className="mt-2 grid grid-cols-4 gap-1" onClick={(e) => e.stopPropagation()}>
+                                                                {[30, 60, 90, 120].map(d => (
+                                                                    <button 
+                                                                        key={d}
+                                                                        className={`px-2 py-1 rounded border text-xs font-semibold ${d === (group.duration || 30) ? 'bg-indigo-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+                                                                        onClick={() => { updateGroupStatus(group.ids, { duration: d }); setOpenDurationPickerId(null); }}
                                                                     >
-                                                                        <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center shrink-0 ${it.checked ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-indigo-300'}`}>
-                                                                            {it.checked && <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-indigo-600" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>}
+                                                                        {`설치 ${d}분`}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* Status Badges */}
+                                                <div className="flex gap-1 justify-end">
+                                                    {group.canceled && group.cancel_type === 'postpone' && <span className="text-[10px] font-bold text-white bg-orange-500 px-2 py-1 rounded-full shrink-0">연기</span>}
+                                                    {group.canceled && group.cancel_type !== 'postpone' && <span className="text-[10px] font-bold text-white bg-red-500 px-2 py-1 rounded-full shrink-0">취소됨</span>}
+                                                    {group.completed && <span className="text-[10px] font-bold text-white bg-green-600 px-2 py-1 rounded-full shrink-0">완료</span>}
+                                                </div>
+
+                                                {/* Accordion Details */}
+                                                {isExpanded && !group.completed && (
+                                                    <div className="mt-3 text-sm text-slate-600 space-y-4 p-3 bg-slate-50 rounded-xl border border-slate-100 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+                                                        <div>
+                                                            <div className="font-bold mb-1">📦 품목</div>
+                                                            <div className="space-y-1">
+                                                                {group.items && group.items.map((it, i) => (
+                                                                    <div key={i} className="flex gap-2 items-start" onClick={() => toggleItemCheck(it._oid, it._oidx)}>
+                                                                        <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center shrink-0 ${it.checked ? 'bg-indigo-500 border-indigo-500' : 'bg-white border-slate-300'}`}>
+                                                                            {it.checked && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                                                                         </div>
-                                                                        <span className={`font-bold transition-colors leading-tight text-indigo-900 ${it.checked ? 'opacity-50' : ''}`}>{it.item}</span>
+                                                                        <span className={it.checked ? 'line-through opacity-50' : ''}>{it.item}</span>
                                                                     </div>
                                                                 ))}
                                                             </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* Top Right Actions (Removed) */}
-
-                                            {/* Collapsible Body */}
-                                            {isExpanded && (
-                                                <div className="pl-1 animate-fade-in border-t pt-2 mt-1">
-                                                    
-                                                    {/* Address & Items are now in Header (Always Visible) */}
-
-                                                    {/* Time controls moved to top */}
-
-                                                    {/* 메모 입력 */}
-                                                    <div className="mb-3">
-                                                        <textarea 
-                                                            placeholder="배송 메모 입력..." 
-                                                            className="w-full text-xs p-2 bg-white border border-slate-200 rounded resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400 placeholder-slate-300 text-slate-800"
-                                                            rows="2"
-                                                            value={group.memo || ''}
-                                                            onChange={(e) => updateMemo(group.ids, e.target.value)}
-                                                        ></textarea>
-                                                    </div>
-
-                                                    {/* 상태 버튼 */}
-                                                    <div className="border-t pt-3 flex flex-col gap-2">
-                                                        <div className="flex justify-between items-center">
-                                                            <div className="flex items-center justify-between gap-2 w-full">
-                                                                <button onClick={() => updateGroupStatus(group.ids, { canceled: false, cancel_type: null, partial: false })} 
-                                                                    className={`px-2 py-1.5 rounded-lg text-[10px] font-bold whitespace-nowrap border select-none transition-transform active:scale-95 flex-1 ${!group.canceled && !group.partial ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
-                                                                    정상
-                                                                </button>
-                                                                <button onClick={() => updateGroupStatus(group.ids, { canceled: true, cancel_type: 'cancel', partial: false })} 
-                                                                    className={`px-2 py-1.5 rounded-lg text-[10px] font-bold whitespace-nowrap border select-none transition-transform active:scale-95 flex-1 ${group.canceled && group.cancel_type === 'cancel' ? 'bg-red-500 text-white border-red-500' : 'bg-white text-gray-500 border-gray-200 hover:bg-red-50'}`}>
-                                                                    취소
-                                                                </button>
-                                                                <button onClick={() => updateGroupStatus(group.ids, { canceled: true, cancel_type: 'postpone', partial: false })} 
-                                                                    className={`px-2 py-1.5 rounded-lg text-[10px] font-bold whitespace-nowrap border select-none transition-transform active:scale-95 flex-1 ${group.canceled && group.cancel_type === 'postpone' ? 'bg-sky-500 text-white border-orange-500' : 'bg-white text-gray-500 border-gray-200 hover:bg-sky-50'}`}>
-                                                                    연기
-                                                                </button>
-                                                                <button onClick={() => updateGroupStatus(group.ids, { canceled: false, cancel_type: null, partial: true })} 
-                                                                    className={`px-2 py-1.5 rounded-lg text-[10px] font-bold whitespace-nowrap border select-none transition-transform active:scale-95 flex-1 ${group.partial ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-500 border-gray-200 hover:bg-purple-50'}`}>
-                                                                    부분
-                                                                </button>
-                                                                <button onClick={() => updateGroupStatus(group.ids, { completed: !group.completed })} 
-                                                                    className={`px-2 py-1.5 rounded-lg text-[10px] font-bold whitespace-nowrap border select-none transition-transform active:scale-95 flex-1 ${group.completed ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-500 border-gray-200 hover:bg-green-50'}`}>
-                                                                    완료
-                                                                </button>
-                                                            </div>
                                                         </div>
                                                         
-                                                        <div className="flex flex-col gap-2 mt-2 border-t pt-2 border-dashed">
-                                                            
-                                                            {/* 설치비 수정 삭제됨 (요청 반영) */}
-                                                            
-                                                            {(group.completed || group.partial || group.canceled) && (
-                                                                <button onClick={() => {
-                                                                    if(group.completed) resetStatus(group.ids, 'completed');
-                                                                    if(group.partial) resetStatus(group.ids, 'partial');
-                                                                    if(group.canceled) resetStatus(group.ids, 'canceled');
-                                                                }} className="w-full py-2 bg-gray-100 text-gray-500 rounded-lg text-xs font-bold hover:bg-gray-200 border border-gray-200">
-                                                                    ↺ 상태 초기화
-                                                                </button>
-                                                            )}
+                                                        <div>
+                                                            <div className="font-bold mb-1">📝 메모</div>
+                                                            <textarea 
+                                                                className="w-full text-sm p-2 border border-slate-200 rounded-lg resize-none h-16"
+                                                                placeholder="메모를 입력하세요"
+                                                                value={group.memo || ''}
+                                                                onChange={(e) => updateMemo(group.ids, e.target.value)}
+                                                            />
+                                                        </div>
+                                            
 
-                                                            {/* [New] 분리하기 버튼 (합쳐진 건인 경우) */}
-                                                            {group.mergedId && (
-                                                                <button 
-                                                                    onClick={() => handleSplitDelivery(group.mergedId)}
-                                                                    className="w-full py-2 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 border border-indigo-200 flex items-center justify-center gap-1"
-                                                                >
-                                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                                                                    <span>원래대로 분리 (복구)</span>
-                                                                </button>
-                                                            )}
+                                                        <div className="flex items-center justify-between bg-white p-2 rounded border border-slate-200">
+                                                            <span className="text-xs text-slate-600 font-bold">무인 설치</span>
+                                                            <label className="flex items-center gap-2">
+                                                                <input 
+                                                                    type="checkbox" 
+                                                                    className="w-4 h-4"
+                                                                    checked={!!group.unattended}
+                                                                    onChange={(e) => updateGroupStatus(group.ids, { unattended: e.target.checked })}
+                                                                />
+                                                                <span className="text-xs text-slate-500">{group.unattended ? '활성' : '비활성'}</span>
+                                                            </label>
                                                         </div>
 
-                                                        {/* 비용 입력 (Collapsible) */}
-                                                        {!group.canceled && (
-                                                            <details className="mt-4 group/cost bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
-                                                                <summary className="list-none cursor-pointer flex justify-between items-center p-3 bg-slate-50/50 hover:bg-slate-100/50 transition-colors select-none">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-sm font-bold text-slate-600">💰 예상 설치비 및 추가비용</span>
-                                                                        {(group.install_fee > 0 || group.yangjung > 0 || group.naerim > 0 || group.etc_fee > 0) && (
-                                                                            <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
-                                                                                {((group.install_fee||0) + (group.yangjung||0) + (group.naerim||0) + (group.etc_fee||0)).toLocaleString()}원
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                    <svg className="w-4 h-4 text-slate-400 transition-transform group-open/cost:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                                                    </svg>
-                                                                </summary>
-                                                                <div className="grid grid-cols-2 gap-2 p-2 bg-white border-t border-slate-100 animate-fade-in">
-                                                                {/* 설치비 (Editable) */}
-                                                                <div className="bg-sky-50/60 p-3 rounded-xl border border-sky-100 flex flex-col justify-center relative transition-colors focus-within:bg-sky-50 focus-within:border-indigo-300">
-                                                                    <span className="text-[11px] text-indigo-800 font-bold mb-0.5 flex items-center gap-1">
-                                                                        <span>🔧</span> 설치비
-                                                                    </span>
-                                                                    <input 
-                                                                        type="tel" 
-                                                                        className="w-full bg-transparent text-right font-black text-lg text-indigo-900 focus:outline-none p-0 placeholder-indigo-200 tracking-tight"
-                                                                        placeholder="0"
-                                                                        value={group.install_fee ? group.install_fee.toLocaleString() : ''}
-                                                                        onChange={(e) => updateGroupFees(group.ids, 'install_fee', e.target.value.replace(/,/g, ''))}
-                                                                        onClick={(e) => e.stopPropagation()}
-                                                                    />
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            {['install_fee', 'yangjung', 'naerim', 'etc_fee'].map(key => (
+                                                                <div key={key} className="bg-white p-1.5 rounded border border-slate-200 flex justify-between items-center">
+                                                                    <span className="text-[10px] text-slate-500">{key === 'install_fee' ? '설치' : key === 'yangjung' ? '양중' : key === 'naerim' ? '내림' : '기타'}</span>
+                                                                    <input type="tel" className="w-16 text-right text-xs font-bold focus:outline-none" placeholder="0" value={group[key] ? group[key].toLocaleString() : ''} onChange={(e) => updateGroupFees(group.ids, key, e.target.value.replace(/,/g, ''))} />
                                                                 </div>
-
-                                                                {/* 양중비 (Input) */}
-                                                                <div className="bg-sky-50/60 p-3 rounded-xl border border-sky-100 flex flex-col justify-center relative transition-colors focus-within:bg-sky-50 focus-within:border-orange-300">
-                                                                    <span className="text-[11px] text-orange-500 font-bold mb-0.5 flex items-center gap-1">
-                                                                        <span>🏗️</span> 양중비
-                                                                    </span>
-                                                                    <input 
-                                                                        type="tel" 
-                                                                        className="w-full bg-transparent text-right font-black text-lg text-orange-900 focus:outline-none p-0 placeholder-orange-200 tracking-tight"
-                                                                        placeholder="0"
-                                                                        value={group.yangjung ? group.yangjung.toLocaleString() : ''}
-                                                                        onChange={(e) => updateGroupFees(group.ids, 'yangjung', e.target.value.replace(/,/g, ''))}
-                                                                        onClick={(e) => e.stopPropagation()}
-                                                                    />
-                                                                </div>
-
-                                                                {/* 내림비 (Input) */}
-                                                                <div className="bg-emerald-50/60 p-3 rounded-xl border border-emerald-100 flex flex-col justify-center relative transition-colors focus-within:bg-emerald-50 focus-within:border-emerald-300">
-                                                                    <span className="text-[11px] text-emerald-600 font-bold mb-0.5 flex items-center gap-1">
-                                                                        <span>⬇️</span> 내림비
-                                                                    </span>
-                                                                    <input 
-                                                                        type="tel" 
-                                                                        className="w-full bg-transparent text-right font-black text-lg text-emerald-900 focus:outline-none p-0 placeholder-emerald-200 tracking-tight"
-                                                                        placeholder="0"
-                                                                        value={group.naerim ? group.naerim.toLocaleString() : ''}
-                                                                        onChange={(e) => updateGroupFees(group.ids, 'naerim', e.target.value.replace(/,/g, ''))}
-                                                                        onClick={(e) => e.stopPropagation()}
-                                                                    />
-                                                                </div>
-
-                                                                {/* 기타비용 (Input) */}
-                                                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col justify-center relative transition-colors focus-within:bg-white focus-within:border-slate-400 focus-within:shadow-sm">
-                                                                    <span className="text-[11px] text-slate-500 font-bold mb-0.5 flex items-center gap-1">
-                                                                        <span>🎸</span> 기타비용
-                                                                    </span>
-                                                                    <input 
-                                                                        type="tel" 
-                                                                        className="w-full bg-transparent text-right font-black text-lg text-slate-900 focus:outline-none p-0 placeholder-slate-200 tracking-tight"
-                                                                        placeholder="0"
-                                                                        value={group.etc_fee ? group.etc_fee.toLocaleString() : ''}
-                                                                        onChange={(e) => updateGroupFees(group.ids, 'etc_fee', e.target.value.replace(/,/g, ''))}
-                                                                        onClick={(e) => e.stopPropagation()}
-                                                                    />
-                                                                </div>
-                                                            </div>
-                                                        </details>
-                                                        )}
+                                                            ))}
+                                                        </div>
+                                            
+                                                       
                                                     </div>
+                                                )}
+                                                
+                                                {/* 완료 메시지 */}
+                                                {isExpanded && group.completed && (
+                                                    <p className="text-[11px] text-slate-400 mt-2">
+                                                        완료된 배송입니다
+                                                    </p>
+                                                )}
+                                            
+                                                <button 
+                                                    onClick={(e) => { e.stopPropagation(); updateGroupStatus(group.ids, { completed: !group.completed }); }} 
+                                                    className="complete-btn"
+                                                >
+                                                    {group.completed ? '✅ 배송 완료됨' : '🚚 배송 완료'}
+                                                </button>
+                                                <div className="flex gap-2 mt-2">
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); updateGroupStatus(group.ids, { canceled: !group.canceled, cancel_type: 'cancel' }); }}
+                                                        className="flex-1 py-3 text-sm font-extrabold rounded-[14px] bg-red-600 text-white"
+                                                    >
+                                                        {group.canceled ? '취소 해제' : '취소'}
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); updateGroupStatus(group.ids, { canceled: !group.canceled, cancel_type: 'postpone' }); }}
+                                                        className="flex-1 py-3 text-sm font-extrabold rounded-[14px] bg-amber-500 text-white"
+                                                    >
+                                                        연기
+                                                    </button>
                                                 </div>
-                                            )}
+                                                <button 
+                                                    onClick={(e) => { e.stopPropagation(); handleNavigation(group.lat, group.lng, group.address); }} 
+                                                    className="map-btn"
+                                                >
+                                                    🗺️ 지도
+                                                </button>
+                                            </div>
                                         </div>
                                         );
                                     })}
@@ -4811,6 +5197,9 @@ ${logContent}
                                         </div>
                                     )}
                                 </div>
+ 
+
+                                
 
                                 {/* 데이터 동기화 (백업/복원) */}
                                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-6">
@@ -4892,13 +5281,11 @@ ${logContent}
                         )}
                     </main>
                     
-                    {/* [AdSense] Admin Only Bottom Ad */}
-                    {view === 'admin' && (
-                        <div className="mt-8 mb-8 max-w-2xl mx-auto px-4">
-                            <div className="text-center text-xs text-gray-400 mb-2">광고</div>
-                            <AdBanner slot="8369403317" className="w-full bg-gray-50 border border-gray-200 rounded-lg overflow-hidden" />
-                        </div>
-                    )}
+                    {/* [Admin Only Area] */} 
+                    <div id="admin-only" style={{display:'none', border:'1px dashed #e5e7eb', padding:'12px', margin:'12px', borderRadius:'12px'}}> 
+                        <strong>관리자 영역</strong> 
+                        <div style={{fontSize:'12px', color:'#64748b', marginTop:'4px'}}> 관리자 전용 콘텐츠 </div> 
+                    </div>
 
                     {/* [New] Guide Modal */}
                     <GuideModal isOpen={showGuideModal} onClose={() => setShowGuideModal(false)} />
@@ -5262,20 +5649,48 @@ ${logContent}
                                 </div>
                                 
                                 <div className="flex items-center gap-4 mb-6 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                    <label className="text-sm font-bold text-slate-600 whitespace-nowrap">조회 월:</label>
-                                    <input 
-                                        type="month" 
-                                        value={monthlyCostTargetMonth} 
-                                        onChange={(e) => setMonthlyCostTargetMonth(e.target.value)}
-                                        className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-base font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    />
+                                    <div className="flex items-center gap-2">
+                                        <button 
+                                            onClick={() => setMonthlyViewMode('month')}
+                                            className={`px-3 py-1 rounded-full text-xs font-bold ${monthlyViewMode === 'month' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 border border-slate-300'}`}
+                                        >
+                                            월
+                                        </button>
+                                        <button 
+                                            onClick={() => setMonthlyViewMode('day')}
+                                            className={`px-3 py-1 rounded-full text-xs font-bold ${monthlyViewMode === 'day' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 border border-slate-300'}`}
+                                        >
+                                            일
+                                        </button>
+                                    </div>
+                                    {monthlyViewMode === 'month' ? (
+                                        <input 
+                                            type="month" 
+                                            value={monthlyCostTargetMonth} 
+                                            onChange={(e) => setMonthlyCostTargetMonth(e.target.value)}
+                                            className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-base font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                    ) : (
+                                        <input 
+                                            type="date" 
+                                            value={monthlyCostTargetDay} 
+                                            onChange={(e) => setMonthlyCostTargetDay(e.target.value)}
+                                            className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-base font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                    )}
                                 </div>
 
                                 <div className="flex-1 overflow-y-auto custom-scrollbar pb-2">
                                     {(() => {
                                         const targetMonth = monthlyCostTargetMonth;
-                                        // 1. 기본 필터: 월 & 취소 제외
-                                        let filtered = deliveries.filter(d => d.date && d.date.startsWith(targetMonth) && !d.canceled);
+                                        let filtered = deliveries.filter(d => {
+                                            if (!d.date || d.canceled) return false;
+                                            if (monthlyViewMode === 'month') {
+                                                return d.date.startsWith(targetMonth);
+                                            } else {
+                                                return d.date === monthlyCostTargetDay;
+                                            }
+                                        });
                                         
                                         // 2. 권한 필터: 기사는 본인 것만, 관리자는 전체(또는 필터링 가능하지만 여기선 전체 합계 보여줌)
                                         // "이 내용은 로그인한 기사만 확인 가능" -> 기사 모드일 땐 본인 데이터만.
@@ -5293,8 +5708,35 @@ ${logContent}
                                             total: acc.total + ((d.install_fee||0)+(d.yangjung||0)+(d.naerim||0)+(d.etc_fee||0))
                                         }), { install: 0, yangjung: 0, naerim: 0, etc: 0, total: 0 });
 
+                                        // Today summary (same month)
+                                        const refDay = monthlyViewMode === 'day' ? monthlyCostTargetDay : new Date().toISOString().slice(0,10);
+                                        const dayItems = filtered.filter(d => d.date === refDay);
+                                        const dayInstall = dayItems.reduce((s, d) => s + (d.install_fee || 0), 0);
+                                        const dayExtra = dayItems.reduce((s, d) => s + ((d.yangjung || 0) + (d.naerim || 0) + (d.etc_fee || 0)), 0);
+                                        const dayTotal = dayInstall + dayExtra;
+
                                         return (
                                             <div className="space-y-4 animate-slide-up">
+                                                {/* Today Summary Card - placed above monthly total */}
+                                                <div className="bg-sky-50 p-3 rounded-xl border border-slate-100">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-xs font-bold text-slate-700">오늘 비용 합계</span>
+                                                    </div>
+                                                    <div className="grid grid-cols-3 gap-2 mt-2">
+                                                        <div className="bg-white rounded-lg px-3 py-2 border border-slate-200 text-center">
+                                                            <span className="block text-[11px] font-bold text-indigo-700 mb-0.5">예상 설치비</span>
+                                                            <span className="block text-sm font-black text-indigo-900">{dayInstall.toLocaleString()}원</span>
+                                                        </div>
+                                                        <div className="bg-white rounded-lg px-3 py-2 border border-slate-200 text-center">
+                                                            <span className="block text-[11px] font-bold text-orange-600 mb-0.5">추가비용</span>
+                                                            <span className="block text-sm font-black text-orange-900">{dayExtra.toLocaleString()}원</span>
+                                                        </div>
+                                                        <div className="bg-white rounded-lg px-3 py-2 border border-slate-200 text-center">
+                                                            <span className="block text-[11px] font-bold text-slate-600 mb-0.5">합계</span>
+                                                            <span className="block text-sm font-black text-slate-900">{dayTotal.toLocaleString()}원</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                                 {/* Total Card */}
                                                 <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white p-6 rounded-2xl shadow-lg shadow-indigo-200 text-center relative overflow-hidden">
                                                     <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-xl"></div>
@@ -5332,6 +5774,71 @@ ${logContent}
                                                         <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">기타비용</span>
                                                         <span className="text-lg font-black text-slate-800">{stats.etc.toLocaleString()}원</span>
                                                     </div>
+                                                </div>
+                                                
+                                                {/* Daily Breakdown */}
+                                                <div className="mt-4">
+                                                    {(() => {
+                                                        const selectedStr = monthlyViewMode === 'day' ? monthlyCostTargetDay : new Date().toISOString().slice(0,10);
+                                                        const selectedItems = filtered.filter(d => d.date === selectedStr);
+                                                        const selInstall = selectedItems.reduce((s, d) => s + (d.install_fee || 0), 0);
+                                                        const selExtra = selectedItems.reduce((s, d) => s + ((d.yangjung || 0) + (d.naerim || 0) + (d.etc_fee || 0)), 0);
+                                                        const selTotal = selInstall + selExtra;
+                                                        const Header = (
+                                                            <>
+                                                                <h4 className="text-sm font-bold text-slate-800 mb-2 flex items-center gap-2">
+                                                                    <span>📅</span> 일별 비용 합계
+                                                                </h4>
+                                                                {monthlyViewMode === 'day' && (
+                                                                    <div className="flex items-center gap-3 mb-2">
+                                                                        <span className="block text-sm font-black text-indigo-900">{selInstall.toLocaleString()}원</span>
+                                                                        <span className="block text-sm font-black text-orange-900">{selExtra.toLocaleString()}원</span>
+                                                                        <span className="block text-sm font-black text-slate-900">{selTotal.toLocaleString()}원</span>
+                                                                    </div>
+                                                                )}
+                                                            </>
+                                                        );
+                                                        const dailyMap = {};
+                                                        filtered.forEach(d => {
+                                                            const day = d.date;
+                                                            if (!dailyMap[day]) dailyMap[day] = { install: 0, extra: 0, total: 0 };
+                                                            dailyMap[day].install += (d.install_fee || 0);
+                                                            dailyMap[day].extra += (d.yangjung || 0) + (d.naerim || 0) + (d.etc_fee || 0);
+                                                            dailyMap[day].total = dailyMap[day].install + dailyMap[day].extra;
+                                                        });
+                                                        const entries = Object.entries(dailyMap).sort((a, b) => a[0].localeCompare(b[0]));
+                                                        if (entries.length === 0) {
+                                                            return (
+                                                                <>
+                                                                    {Header}
+                                                                    <div className="text-center text-slate-400 text-sm py-3">해당 월의 일별 데이터가 없습니다.</div>
+                                                                </>
+                                                            );
+                                                        }
+                                                        return (
+                                                            <>
+                                                                {Header}
+                                                                <div className="space-y-2">
+                                                                {entries.map(([day, v]) => (
+                                                                    <div key={day} className="bg-white p-3 rounded-xl border border-slate-100 flex items-center justify-between">
+                                                                        <div className="text-sm font-bold text-slate-800">{day}</div>
+                                                                        <div className="flex items-center gap-3">
+                                                                            <div className="text-xs font-bold text-indigo-700">
+                                                                                설치비 <span className="font-black text-slate-900 ml-1">{v.install.toLocaleString()}원</span>
+                                                                            </div>
+                                                                            <div className="text-xs font-bold text-orange-600">
+                                                                                추가비용 <span className="font-black text-slate-900 ml-1">{v.extra.toLocaleString()}원</span>
+                                                                            </div>
+                                                                            <div className="text-xs font-bold text-slate-600">
+                                                                                합계 <span className="font-black text-slate-900 ml-1">{v.total.toLocaleString()}원</span>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                                </div>
+                                                            </>
+                                                        );
+                                                    })()}
                                                 </div>
 
                                                 {filtered.length === 0 && (
