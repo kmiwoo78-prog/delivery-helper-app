@@ -150,6 +150,7 @@
          
          .card-body { 
            padding: 16px; 
+           padding-top: 24px; 
            display: flex; 
            flex-direction: column; 
            gap: 12px; 
@@ -3003,6 +3004,31 @@
                 StorageManager.saveDeliveries(newDeliveries);
             }
             
+            function readJsonFileWithEncoding(file, cb) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const buf = ev.target.result;
+                    let text = '';
+                    let data = null;
+                    try {
+                        text = new TextDecoder('utf-8').decode(buf);
+                        data = JSON.parse(text);
+                    } catch {}
+                    if (!data) {
+                        try {
+                            text = new TextDecoder('euc-kr').decode(buf);
+                            data = JSON.parse(text);
+                        } catch {}
+                    }
+                    if (!data) {
+                        alert('파일 인코딩을 확인해주세요. UTF-8 또는 EUC-KR 형식을 권장합니다.');
+                        return;
+                    }
+                    cb(data);
+                };
+                reader.readAsArrayBuffer(file);
+            }
+            
             function completeDelivery(id) {
                 const newDeliveries = deliveries.map(d => {
                     if (d.id === id) return { ...d, completed: true };
@@ -3025,6 +3051,8 @@
             // 예약/설치 시간 버튼형 선택 팝업 상태
             const [openTimePickerId, setOpenTimePickerId] = useState(null);
             const [openDurationPickerId, setOpenDurationPickerId] = useState(null);
+            const [showAddItemModal, setShowAddItemModal] = useState(false);
+            const [addForm, setAddForm] = useState({ date: '', phone: '', address: '', item: '' });
 
             // [기능] 엑셀 다운로드
             async function downloadTemplate() {
@@ -3541,6 +3569,60 @@
                 });
             }
 
+            // [기능] 그룹에 상품 추가 (첫 번째 원본에 상세 품목으로 추가)
+            function addGroupItem(ids) {
+                if (!ids || ids.length === 0) return;
+                const targetId = ids[0];
+                setDeliveries(prev => {
+                    const next = prev.map(d => {
+                        if (d.id === targetId) {
+                            let items = d.detail_items ? [...d.detail_items] : null;
+                            if (!items) {
+                                // 기존 단일 항목을 상세로 승격
+                                items = [{ item: d.item || '상품', checked: !!d.checked, settlement_amount: d.settlement_amount || 0 }];
+                            }
+                            items.push({ item: '상품', checked: false, settlement_amount: 0 });
+                            return { ...d, detail_items: items };
+                        }
+                        return d;
+                    });
+                    StorageManager.saveDeliveries(next);
+                    return next;
+                });
+                setToastMsg('📦 상품을 추가했습니다.');
+            }
+
+            function openAddItemForm() {
+                setAddForm({ date: targetDate || '', phone: '', address: '', item: '' });
+                setShowAddItemModal(true);
+            }
+
+            function handleAddItemSubmit() {
+                const { date, phone, address, item } = addForm;
+                if (!date || !phone || !address || !item) {
+                    alert('배송날짜, 전화번호, 주소, 품목을 모두 입력해주세요.');
+                    return;
+                }
+                const newDelivery = {
+                    id: crypto.randomUUID(),
+                    date,
+                    item,
+                    address,
+                    phone,
+                    driver: currentUser || '',
+                    settlement_amount: 0,
+                    completed: false,
+                    canceled: false,
+                    time: '',
+                    duration: 30,
+                };
+                const next = [newDelivery, ...deliveries];
+                setDeliveries(next);
+                StorageManager.saveDeliveries(next);
+                setShowAddItemModal(false);
+                setToastMsg('✅ 개별 상품을 추가했습니다.');
+            }
+
             // [기능] 테스트 데이터 로드 (12건)
             function handleLoadTestData() {
                 const today = new Date().toISOString().split('T')[0];
@@ -3835,7 +3917,7 @@ ${logContent}
                                        <h3 className="font-bold text-slate-800 text-base"> 
                                          🚦 오늘 배송 현황 
                                        </h3> 
-                                      <p className="text-sm text-slate-500 truncate"> 
+                                      <p className="text-xs md:text-sm text-slate-500 truncate"> 
                                         {(() => {
                                           const remaining = groupedDeliveries.filter(d => !d.completed && !d.canceled).length;
                                           const done = groupedDeliveries.filter(d => d.completed).length;
@@ -3857,12 +3939,14 @@ ${logContent}
                                       </p> 
                                      </div> 
                                  
-                                     <button 
-                                       onClick={() => setShowMap(v => !v)} 
-                                       className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-bold text-sm shadow hover:bg-indigo-700 whitespace-nowrap shrink-0" 
-                                     > 
-                                       {showMap ? '목록 보기' : '지도 보기'} 
-                                     </button> 
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <button 
+                                        onClick={() => setShowMap(v => !v)} 
+                                        className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-bold text-sm shadow hover:bg-indigo-700 whitespace-nowrap" 
+                                      > 
+                                        {showMap ? '목록 보기' : '지도 보기'} 
+                                      </button> 
+                                    </div>
                                    </div> 
                                  </Card>
                             </>
@@ -3879,6 +3963,10 @@ ${logContent}
                                 </div>
                             </div>
                         )}
+
+                        
+
+                        
                     </div>
 
                     <main className="px-4 pb-32 max-w-7xl mx-auto pt-0">
@@ -4479,24 +4567,17 @@ ${logContent}
                                                         <input type="file" hidden accept=".json" onChange={(e) => {
                                                             const file = e.target.files[0];
                                                             if(!file) return;
-                                                            const reader = new FileReader();
-                                                            reader.onload = (ev) => {
-                                                                try {
-                                                                    const data = JSON.parse(ev.target.result);
-                                                                    if(Array.isArray(data)) {
-                                                                        if(confirm(`기사님이 작업한 ${data.length}건의 데이터를 불러오시겠습니까? 기존 데이터는 업데이트됩니다.`)) {
-                                                                            setDeliveries(data);
-                                                                            StorageManager.saveDeliveries(data);
-                                                                            alert("데이터가 동기화되었습니다.");
-                                                                        }
-                                                                    } else {
-                                                                        alert("올바르지 않은 데이터 형식입니다.");
+                                                            readJsonFileWithEncoding(file, (data) => {
+                                                                if(Array.isArray(data)) {
+                                                                    if(confirm(`기사님이 작업한 ${data.length}건의 데이터를 불러오시겠습니까? 기존 데이터는 업데이트됩니다.`)) {
+                                                                        setDeliveries(data);
+                                                                        StorageManager.saveDeliveries(data);
+                                                                        alert("데이터가 동기화되었습니다.");
                                                                     }
-                                                                } catch(err) {
-                                                                    alert("파일을 읽는 중 오류가 발생했습니다.");
+                                                                } else {
+                                                                    alert("올바르지 않은 데이터 형식입니다.");
                                                                 }
-                                                            };
-                                                            reader.readAsText(file);
+                                                            });
                                                         }} />
                                                     </label>
 
@@ -4959,13 +5040,16 @@ ${logContent}
 
                                             <div className="card-body">
                                                 {/* Header row: left current-label, right badges */}
-                                                <div className="ml-12 mb-1 flex items-center">
+                                                <div className={`ml-12 ${(group.is_active && group.sequence_number === 1 && !group.completed) ? 'mb-1' : 'mb-2'} flex items-center`}>
                                                     {(group.is_active && group.sequence_number === 1 && !group.completed) && (
                                                         <div className="current-label">🚚 현재 배송 중</div>
                                                     )}
                                                     <div className="ml-auto flex items-center gap-1">
                                                         {directInstall && (
                                                             <span className="text-[10px] font-bold text-white bg-red-600 px-2 py-1 rounded-full shrink-0">직접</span>
+                                                        )}
+                                                        {group.time && (
+                                                            <span className="text-[10px] font-bold text-white bg-indigo-500 px-2 py-1 rounded-full shrink-0">⏰ {group.time}</span>
                                                         )}
                                                         {group.unattended && (
                                                             <span className="text-[10px] font-bold text-white bg-sky-600 px-2 py-1 rounded-full shrink-0">무인</span>
@@ -5031,26 +5115,46 @@ ${logContent}
                                                 <div className="flex gap-2 mb-2">
                                                     <div className="flex-1">
                                                         <button 
-                                                            className="w-full px-3 py-2 rounded-full border text-xs font-bold text-left"
-                                                            onClick={(e) => { e.stopPropagation(); setOpenTimePickerId(openTimePickerId === groupId ? null : groupId); }}
+                                                            className="w-full px-3 py-2 rounded-full border text-xs font-bold text-left hover:bg-slate-50 transition-colors"
+                                                            onClick={(e) => { 
+                                                                e.stopPropagation(); 
+                                                                setOpenTimePickerId(openTimePickerId === groupId ? null : groupId);
+                                                            }}
                                                         >
-                                                            ⏰ {group.time || '예약시간'}
+                                                            ⏰ {group.time ? group.time : '예약시간 설정'}
                                                         </button>
                                                         {openTimePickerId === groupId && (
-                                                            <div className="mt-2 grid grid-cols-4 gap-1" onClick={(e) => e.stopPropagation()}>
-                                                                {TIME_SLOTS.map(t => {
-                                                                    const disabled = checkTimeConflict(t, group.duration || 30, group.ids);
-                                                                    return (
-                                                                        <button 
-                                                                            key={t}
-                                                                            disabled={disabled}
-                                                                            className={`px-2 py-1 rounded border text-xs font-semibold ${disabled ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
-                                                                            onClick={() => { handleTimeSelect(group.ids, t, group.duration || 30); setOpenTimePickerId(null); }}
-                                                                        >
-                                                                            {t}
-                                                                        </button>
-                                                                    );
-                                                                })}
+                                                            <div className="mt-2 p-2 bg-white border rounded shadow-lg z-50 relative w-full" onClick={(e) => e.stopPropagation()}>
+                                                                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1">
+                                                                    {TIME_SLOTS.map(t => {
+                                                                        const disabled = checkTimeConflict(t, group.duration || 30, group.ids);
+                                                                        return (
+                                                                            <button 
+                                                                                key={t}
+                                                                                disabled={disabled}
+                                                                                className={`px-0 py-2 rounded border text-[11px] font-semibold whitespace-nowrap ${
+                                                                                    group.time === t ? 'bg-indigo-600 text-white border-indigo-600' : 
+                                                                                    disabled ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-white text-slate-700 hover:bg-indigo-50 border-slate-200'
+                                                                                }`}
+                                                                                onClick={() => { 
+                                                                                    handleTimeSelect(group.ids, t, group.duration || 30); 
+                                                                                    setOpenTimePickerId(null); 
+                                                                                }}
+                                                                            >
+                                                                                {t}
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                                <button 
+                                                                    className="w-full mt-2 px-2 py-2 rounded border border-red-200 text-xs font-bold text-red-500 hover:bg-red-50"
+                                                                    onClick={() => { 
+                                                                        handleTimeSelect(group.ids, '', group.duration || 30); 
+                                                                        setOpenTimePickerId(null); 
+                                                                    }}
+                                                                >
+                                                                    시간 초기화
+                                                                </button>
                                                             </div>
                                                         )}
                                                     </div>
@@ -5167,7 +5271,7 @@ ${logContent}
                                                 </div>
                                                 <button 
                                                     onClick={(e) => { e.stopPropagation(); handleNavigation(group.lat, group.lng, group.address); }} 
-                                                    className="map-btn"
+                                                    className="map-btn ring-2 ring-slate-300"
                                                 >
                                                     🗺️ 지도
                                                 </button>
@@ -5202,6 +5306,28 @@ ${logContent}
                                 
 
                                 {/* 데이터 동기화 (백업/복원) */}
+                                <div className="mt-4 flex gap-2">
+                                    <button onClick={openAddItemForm} className="flex-1 bg-indigo-600 text-white py-4 rounded-lg font-bold hover:bg-indigo-700 transition text-sm shadow-lg shadow-indigo-200 flex items-center justify-center gap-2">
+                                        <span className="text-xl">➕</span>
+                                        <span>개별상품추가</span>
+                                    </button>
+                                    <button 
+                                        onClick={() => {
+                                            const newName = prompt('변경할 기사님의 이름을 입력해주세요:', currentUser);
+                                            if (newName && newName.trim() !== '' && newName !== currentUser) {
+                                                if (confirm(`${newName} 기사님으로 변경하시겠습니까?`)) {
+                                                    localStorage.setItem('delivery_app_session_driver', newName);
+                                                    setCurrentUser(newName);
+                                                    window.location.reload();
+                                                }
+                                            }
+                                        }}
+                                        className="flex-1 bg-white text-indigo-600 border-2 border-indigo-100 py-4 rounded-lg font-bold hover:bg-indigo-50 transition text-sm shadow-sm flex items-center justify-center gap-2"
+                                    >
+                                        <span className="text-xl">🔄</span>
+                                        <span>기사변경</span>
+                                    </button>
+                                </div>
                                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-6">
                                     <div className="flex items-center justify-between mb-3">
                                         <h3 className="font-bold text-slate-700 flex items-center gap-2">
@@ -5239,24 +5365,17 @@ ${logContent}
                                             <input type="file" hidden accept=".json" onChange={(e) => {
                                                 const file = e.target.files[0];
                                                 if(!file) return;
-                                                const reader = new FileReader();
-                                                reader.onload = (ev) => {
-                                                    try {
-                                                        const data = JSON.parse(ev.target.result);
-                                                        if(Array.isArray(data)) {
-                                                            if(confirm(`총 ${data.length}건의 데이터를 불러오시겠습니까? 현재 데이터는 덮어씌워집니다.`)) {
-                                                                setDeliveries(data);
-                                                                StorageManager.saveDeliveries(data);
-                                                                alert("데이터가 업데이트되었습니다.");
-                                                            }
-                                                        } else {
-                                                            alert("올바르지 않은 데이터 형식입니다.");
+                                                readJsonFileWithEncoding(file, (data) => {
+                                                    if(Array.isArray(data)) {
+                                                        if(confirm(`총 ${data.length}건의 데이터를 불러오시겠습니까? 현재 데이터는 덮어씌워집니다.`)) {
+                                                            setDeliveries(data);
+                                                            StorageManager.saveDeliveries(data);
+                                                            alert("데이터가 업데이트되었습니다.");
                                                         }
-                                                    } catch(err) {
-                                                        alert("파일을 읽는 중 오류가 발생했습니다.");
+                                                    } else {
+                                                        alert("올바르지 않은 데이터 형식입니다.");
                                                     }
-                                                };
-                                                reader.readAsText(file);
+                                                });
                                             }} />
                                         </label>
                                     </div>
@@ -5627,6 +5746,63 @@ ${logContent}
                                         className="flex-1 px-4 py-3 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-200"
                                     >
                                         이동하기
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showAddItemModal && (
+                        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={() => setShowAddItemModal(false)}>
+                            <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full relative" onClick={e => e.stopPropagation()}>
+                                <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                                    <span>📦</span> 개별 상품 추가
+                                </h3>
+                                <div className="space-y-3 mb-4">
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-600 mb-1 block">배송날짜</label>
+                                        <input type="date" className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                                            value={addForm.date}
+                                            onChange={e => setAddForm({ ...addForm, date: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-600 mb-1 block">전화번호</label>
+                                        <input type="tel" className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                                            value={addForm.phone}
+                                            onChange={e => setAddForm({ ...addForm, phone: e.target.value })}
+                                            placeholder="숫자만 입력"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-600 mb-1 block">주소</label>
+                                        <input type="text" className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                                            value={addForm.address}
+                                            onChange={e => setAddForm({ ...addForm, address: e.target.value })}
+                                            placeholder="주소 입력"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-600 mb-1 block">품목</label>
+                                        <input type="text" className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                                            value={addForm.item}
+                                            onChange={e => setAddForm({ ...addForm, item: e.target.value })}
+                                            placeholder="예: 침대 프레임"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button 
+                                        onClick={() => setShowAddItemModal(false)}
+                                        className="flex-1 px-4 py-3 rounded-xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition"
+                                    >
+                                        취소
+                                    </button>
+                                    <button 
+                                        onClick={handleAddItemSubmit}
+                                        className="flex-1 px-4 py-3 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition shadow-lg shadow-indigo-200"
+                                    >
+                                        추가하기
                                     </button>
                                 </div>
                             </div>
