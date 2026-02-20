@@ -723,18 +723,23 @@
 
             useEffect(() => {
                 if (!mapRef.current) return;
-                
-                // [디버그] 마커 상태 로그
-                console.log(`[Map] 렌더링: 활성 마커 ${locations.length}개, 중심: ${center?.address || 'N/A'}`);
+                const isValid = (p) => {
+                    if (!p || p.lat == null || p.lng == null) return false;
+                    const lat = Number(p.lat);
+                    const lng = Number(p.lng);
+                    return !isNaN(lat) && !isNaN(lng);
+                };
+                const fallbackCenter = { lat: 37.5665, lng: 126.9780 };
+                const safeCenter = isValid(center) ? { lat: Number(center.lat), lng: Number(center.lng) } : fallbackCenter;
 
                 // 초기화
                 if (!mapInstance.current) {
                     mapInstance.current = L.map(mapRef.current, {
                         zoomControl: false // [수정] 줌 컨트롤(+/-) 제거
-                    }).setView([center.lat, center.lng], 12);
+                    }).setView([safeCenter.lat, safeCenter.lng], 12);
                     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' }).addTo(mapInstance.current);
                 } else {
-                    mapInstance.current.setView([center.lat, center.lng], 12);
+                    mapInstance.current.setView([safeCenter.lat, safeCenter.lng], 12);
                 }
 
                 // 마커 클리어
@@ -743,13 +748,13 @@
                 });
 
                 // 1. 출발지 마커 (파랑)
-                if (startPoint) {
+                if (isValid(startPoint)) {
                     const startIcon = L.divIcon({
                         className: 'custom-marker',
                         html: `<div style="background-color:#2563eb; width:20px; height:20px; border-radius:50%; border:2px solid white; box-shadow:0 0 5px black;"></div>`,
                         iconSize: [20, 20]
                     });
-                    const startMarker = L.marker([startPoint.lat, startPoint.lng], { icon: startIcon }).addTo(mapInstance.current).bindPopup("🚩 출발지 (물류센터)");
+                    const startMarker = L.marker([Number(startPoint.lat), Number(startPoint.lng)], { icon: startIcon }).addTo(mapInstance.current).bindPopup("🚩 출발지 (물류센터)");
                     startMarker.off('click');
                     startMarker.on('click', function() {
                         if (this.isPopupOpen()) this.closePopup();
@@ -770,7 +775,7 @@
                             iconSize: [30, 30],
                             iconAnchor: [15, 15]
                         });
-                        const destMarker = L.marker([group.lat, group.lng], { icon }).addTo(mapInstance.current)
+                    const destMarker = L.marker([Number(group.lat), Number(group.lng)], { icon }).addTo(mapInstance.current)
                          .bindPopup(`<div class="font-bold text-center p-2">🏠 도착지(집)<br/><span class="text-xs text-gray-500">${group.address}</span></div>`);
                         destMarker.off('click');
                         destMarker.on('click', function() {
@@ -817,7 +822,7 @@
                             </div>
                         </div>
                     `;
-                    const marker = L.marker([group.lat, group.lng], { icon }).addTo(mapInstance.current).bindPopup(popupContent);
+                    const marker = L.marker([Number(group.lat), Number(group.lng)], { icon }).addTo(mapInstance.current).bindPopup(popupContent);
                     marker.off('click');
                     marker.on('click', function() {
                         if (this.isPopupOpen()) {
@@ -829,12 +834,17 @@
                 });
 
                 // 3. 경로 선 그리기
-                if (startPoint && locations.length > 0) {
-                    const latlngs = [
-                        [startPoint.lat, startPoint.lng],
-                        ...locations.map(l => [l.lat, l.lng])
-                    ];
-                    L.polyline(latlngs, { color: '#2563eb', weight: 4, opacity: 0.7, dashArray: '10, 10' }).addTo(mapInstance.current);
+                {
+                    const latlngs = [];
+                    if (isValid(startPoint)) latlngs.push([Number(startPoint.lat), Number(startPoint.lng)]);
+                    locations.forEach(l => {
+                        const lat = Number(l?.lat);
+                        const lng = Number(l?.lng);
+                        if (!isNaN(lat) && !isNaN(lng)) latlngs.push([lat, lng]);
+                    });
+                    if (latlngs.length >= 2) {
+                        L.polyline(latlngs, { color: '#2563eb', weight: 4, opacity: 0.7, dashArray: '10, 10' }).addTo(mapInstance.current);
+                    }
                 }
 
             }, [locations, center, startPoint]);
@@ -5076,10 +5086,10 @@ ${logContent}
                                                 ...groupedDeliveries.filter(d => d.is_active).slice(0, 30),
                                                 ...(endPoint ? [endPoint] : [])
                                             ]} 
-                                            center={
-                                                // [수정] 지도 열릴 때 1번 배송지(첫 번째 활성 항목)를 중심으로 표시
-                                                groupedDeliveries.find(d => d.is_active) || startPoint || { lat: 37.5665, lng: 126.9780 }
-                                            } 
+                                                center={
+                                                    groupedDeliveries.find(d => d.is_active && d.lat && d.lng && !isNaN(d.lat) && !isNaN(d.lng)) 
+                                                    || (startPoint && startPoint.lat && startPoint.lng ? startPoint : { lat: 37.5665, lng: 126.9780 })
+                                                } 
                                             startPoint={startPoint}
                                         />
                                     </>
