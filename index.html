@@ -6082,7 +6082,7 @@ ${logContent}
                                             <div className="space-y-4 animate-slide-up">
                                                 {/* Today Summary Card - placed above monthly total */}
                                                 <div className="bg-sky-50 p-3 rounded-xl border border-slate-100">
-                                                    <div className="flex items-center justify-between">
+                                                    <div className="flex items-center justify-center">
                                                         <span className="text-xs font-bold text-slate-700">오늘 비용 합계</span>
                                                     </div>
                                                     <div className="grid grid-cols-2 gap-2 mt-2">
@@ -6131,70 +6131,7 @@ ${logContent}
                                                     </div>
                                                 </div>
                                                 
-                                                {/* Daily Breakdown */}
-                                                <div className="mt-4">
-                                                    {(() => {
-                                                        const selectedStr = monthlyViewMode === 'day' ? monthlyCostTargetDay : new Date().toISOString().slice(0,10);
-                                                        const selectedItems = filtered.filter(d => d.date === selectedStr);
-                                                        const selInstall = selectedItems.reduce((s, d) => s + (d.install_fee || 0), 0);
-                                                        const selExtra = selectedItems.reduce((s, d) => s + ((d.yangjung || 0) + (d.naerim || 0) + (d.etc_fee || 0)), 0);
-                                                        const selTotal = selInstall + selExtra;
-                                                        const Header = (
-                                                            <>
-                                                                <h4 className="text-sm font-bold text-slate-800 mb-2 flex items-center gap-2">
-                                                                    <span>📅</span> 일별 비용 합계
-                                                                </h4>
-                                                                {monthlyViewMode === 'day' && (
-                                                                    <div className="flex items-center gap-3 mb-2">
-                                                                        <span className="block text-sm font-black text-indigo-900">{selInstall.toLocaleString()}원</span>
-                                                                        <span className="block text-sm font-black text-orange-900">{selExtra.toLocaleString()}원</span>
-                                                                        <span className="block text-sm font-black text-slate-900">{selTotal.toLocaleString()}원</span>
-                                                                    </div>
-                                                                )}
-                                                            </>
-                                                        );
-                                                        const dailyMap = {};
-                                                        filtered.forEach(d => {
-                                                            const day = d.date;
-                                                            if (!dailyMap[day]) dailyMap[day] = { install: 0, extra: 0, total: 0 };
-                                                            dailyMap[day].install += (d.install_fee || 0);
-                                                            dailyMap[day].extra += (d.yangjung || 0) + (d.naerim || 0) + (d.etc_fee || 0);
-                                                            dailyMap[day].total = dailyMap[day].install + dailyMap[day].extra;
-                                                        });
-                                                        const entries = Object.entries(dailyMap).sort((a, b) => a[0].localeCompare(b[0]));
-                                                        if (entries.length === 0) {
-                                                            return (
-                                                                <>
-                                                                    {Header}
-                                                                    <div className="text-center text-slate-400 text-sm py-3">해당 월의 일별 데이터가 없습니다.</div>
-                                                                </>
-                                                            );
-                                                        }
-                                                        return (
-                                                            <>
-                                                                {Header}
-                                                                <div className="space-y-2">
-                                                                {entries.map(([day, v]) => (
-                                                                    <div key={day} className="bg-white p-3 rounded-xl border border-slate-100 flex items-center justify-between">
-                                                                        <div className="text-sm font-bold text-slate-800">{day}</div>
-                                                                        <div className="flex items-center gap-3">
-                                                                            <div className="text-xs font-bold text-indigo-700">
-                                                                                설치비 <span className="font-black text-slate-900 ml-1">{v.install.toLocaleString()}원</span>
-                                                                            </div>
-                                                                            <div className="text-xs font-bold text-orange-600">
-                                                                                추가비용 <span className="font-black text-slate-900 ml-1">{v.extra.toLocaleString()}원</span>
-                                                                            </div>
-                                                                            <div className="text-xs font-bold text-slate-600">
-                                                                                합계 <span className="font-black text-slate-900 ml-1">{v.total.toLocaleString()}원</span>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                ))}
-                                                                </div>
-                                                            </>
-                                                        );
-                                                    })()}
-                                                </div>
+                                                
 
                                                 {filtered.length === 0 && (
                                                     <div className="text-center text-slate-400 text-sm py-4">
