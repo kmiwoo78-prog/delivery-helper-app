@@ -349,6 +349,120 @@
                 localStorage.clear();
                 console.log("[Storage] All data cleared.");
             },
+            cleanupEphemeral: async () => {
+                let removedCount = 0;
+                try {
+                    if (localStorage.getItem('mvp_validation_report')) {
+                        localStorage.removeItem('mvp_validation_report');
+                        removedCount++;
+                    }
+                } catch (e) { /* ignore */ }
+                // Optional minor keys cleanup (safe to reconfigure later)
+                try {
+                    if (localStorage.getItem('mvp_notice')) {
+                        localStorage.removeItem('mvp_notice');
+                        removedCount++;
+                    }
+                } catch (e) { /* ignore */ }
+                // Clear runtime caches (Service Worker Cache API)
+                try {
+                    if ('caches' in window) {
+                        const keys = await caches.keys();
+                        for (const k of keys) {
+                            await caches.delete(k);
+                            removedCount++;
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+                return removedCount;
+            },
+            ensurePersistent: async () => {
+                if (!('storage' in navigator) || !navigator.storage.persist) {
+                    alert('브라우저가 영구 저장 권한 요청을 지원하지 않습니다.');
+                    return false;
+                }
+                try {
+                    const already = await navigator.storage.persisted();
+                    if (already) {
+                        alert('이미 영구 저장으로 설정되어 있습니다.');
+                        return true;
+                    }
+                    const ok = await navigator.storage.persist();
+                    alert(ok ? '영구 저장 권한이 승인되었습니다.' : '영구 저장 권한을 얻지 못했습니다.');
+                    return ok;
+                } catch (e) {
+                    alert('영구 저장 요청 중 오류가 발생했습니다.');
+                    return false;
+                }
+            },
+            showEstimate: async () => {
+                if (!('storage' in navigator) || !navigator.storage.estimate) {
+                    alert('브라우저가 저장소 사용량 조회를 지원하지 않습니다.');
+                    return;
+                }
+                const est = await navigator.storage.estimate();
+                const usage = Math.round((est.usage || 0) / (1024 * 1024));
+                const quota = Math.round((est.quota || 0) / (1024 * 1024));
+                alert(`저장소 사용량: ${usage}MB / 할당량: ${quota}MB`);
+            },
+            compactDeliveriesForCloud: (data, days) => {
+                try {
+                    const now = new Date();
+                    const cutoff = new Date(now.getTime() - (days * 24 * 60 * 60 * 1000));
+                    const fmt = (d) => {
+                        if (!d) return null;
+                        const t = new Date(d);
+                        if (isNaN(t.getTime())) return d;
+                        const off = t.getTimezoneOffset() * 60000;
+                        return new Date(t.getTime() - off).toISOString().split('T')[0];
+                    };
+                    return (data || []).filter(x => {
+                        const ds = fmt(x.date);
+                        const dx = new Date(ds || x.date);
+                        return !isNaN(dx.getTime()) && dx >= cutoff;
+                    }).map(x => ({
+                        id: x.id,
+                        date: x.date,
+                        address: x.address,
+                        phone: x.phone,
+                        lat: x.lat,
+                        lng: x.lng,
+                        driver: x.driver,
+                        completed: !!x.completed,
+                        canceled: !!x.canceled,
+                        cancel_type: x.cancel_type || null,
+                        sequence_number: x.sequence_number || null,
+                        install_fee: x.install_fee || 0,
+                        yangjung: x.yangjung || 0,
+                        naerim: x.naerim || 0,
+                        etc_fee: x.etc_fee || 0
+                    }));
+                } catch (e) {
+                    return data || [];
+                }
+            },
+            exportArchive: (data, days) => {
+                try {
+                    const now = new Date();
+                    const cutoff = new Date(now.getTime() - (days * 24 * 60 * 60 * 1000));
+                    const older = (data || []).filter(x => {
+                        const dx = new Date(x.date);
+                        return !isNaN(dx.getTime()) && dx < cutoff;
+                    });
+                    const blob = new Blob([JSON.stringify(older, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+                    a.href = url;
+                    a.download = `deliveries_archive_${ts}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 2000);
+                } catch (e) {
+                    alert('아카이브 내보내기 중 오류가 발생했습니다.');
+                }
+            },
             // 데이터별 편의 메서드
             saveDeliveries: async (data) => {
                 try {
@@ -363,13 +477,21 @@
                     }
                     
                     if (CloudManager.isConnected && CloudManager.client) {
-                        await CloudManager.push(data);
+                        const settings = StorageManager.get(Config.STORAGE_KEYS.SETTINGS) || {};
+                        const enabled = !!settings.cloud_compact_enabled;
+                        const days = settings.cloud_compact_days || 60;
+                        const payload = enabled ? StorageManager.compactDeliveriesForCloud(data, days) : data;
+                        await CloudManager.push(payload);
                         console.log("[AutoSync] Synced to cloud");
                     } else {
                         console.warn("[AutoSync] Cloud not connected - attempting reconnect");
                         CloudManager.init(Config.SUPABASE_URL, Config.SUPABASE_KEY);
                         if (CloudManager.isConnected) {
-                            await CloudManager.push(data);
+                            const settings = StorageManager.get(Config.STORAGE_KEYS.SETTINGS) || {};
+                            const enabled = !!settings.cloud_compact_enabled;
+                            const days = settings.cloud_compact_days || 60;
+                            const payload = enabled ? StorageManager.compactDeliveriesForCloud(data, days) : data;
+                            await CloudManager.push(payload);
                         }
                     }
                     
@@ -520,12 +642,72 @@
                 // [개선된 지오코딩 로직]
                 // 1. 기본 정제: 괄호 제거, 앞뒤 공백 제거
                 let cleanAddr = address.split('(')[0].trim();
+                // 콤마 등 구두점 제거로 토큰 인식 향상
+                cleanAddr = cleanAddr.replace(/[,\u3001]/g, ' ');
+                
+                // 도로명 기반 지역 힌트
+                const roadToRegion = {
+                    '독정이로': '미추홀구',
+                    '영종대로': '중구',
+                    '영종대로278번길': '중구'
+                };
+                
+                // 지역 프리픽스 보정 (광역시/도 표기 통일)
+                const regionPrefix = (() => {
+                    const a = cleanAddr;
+                    if (a.includes('서울')) return '서울특별시';
+                    if (a.includes('인천')) return '인천광역시';
+                    if (a.includes('부산')) return '부산광역시';
+                    if (a.includes('대구')) return '대구광역시';
+                    if (a.includes('대전')) return '대전광역시';
+                    if (a.includes('광주')) return '광주광역시';
+                    if (a.includes('울산')) return '울산광역시';
+                    if (a.includes('세종')) return '세종특별자치시';
+                    if (a.includes('경기')) return '경기도';
+                    if (a.includes('강원')) return '강원특별자치도';
+                    if (a.includes('충남')) return '충청남도';
+                    if (a.includes('충북')) return '충청북도';
+                    if (a.includes('전남')) return '전라남도';
+                    if (a.includes('전북')) return '전라북도';
+                    if (a.includes('경남')) return '경상남도';
+                    if (a.includes('경북')) return '경상북도';
+                    if (a.includes('제주')) return '제주특별자치도';
+                    return '';
+                })();
+                
+                const KR_SUFFIX = ' 대한민국';
+                const REGION_CENTERS = {
+                    '인천': { lat: 37.4563, lng: 126.7052 },
+                    '미추홀구': { lat: 37.444, lng: 126.687 }, // 대략 미추홀구 중심
+                    '중구': { lat: 37.4609, lng: 126.5547 }, // 인천 중구(영종) 대략 중심
+                };
+                const REGION_VIEWBOX = {
+                    // viewbox: left,top,right,bottom (lon,lat,lon,lat)
+                    incheon: { left: 126.52, top: 37.55, right: 126.80, bottom: 37.30 }
+                };
+                const nearRegion = (() => {
+                    if (cleanAddr.includes('미추홀구')) return '미추홀구';
+                    if (cleanAddr.includes('중구')) return '중구';
+                    if (cleanAddr.includes('인천')) return '인천';
+                    // 도로명 힌트
+                    for (const road in roadToRegion) {
+                        if (cleanAddr.includes(road)) return roadToRegion[road];
+                    }
+                    return null;
+                })();
+                const isFar = (coords, centerKey, limitKm = 60) => {
+                    if (!coords || !centerKey || !REGION_CENTERS[centerKey]) return false;
+                    const c = REGION_CENTERS[centerKey];
+                    const dist = getDistance(c.lat, c.lng, coords.lat, coords.lng);
+                    return dist > limitKm;
+                };
                 
                 // 도우미 함수: Nominatim 검색
                 const search = async (query) => {
                     try {
                         // console.log("Searching:", query); // Debug
-                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+                        const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=kr&q=${encodeURIComponent(query)}`;
+                        const res = await fetch(url);
                         const data = await res.json();
                         if (data && data.length > 0) {
                             const lat = parseFloat(data[0].lat);
@@ -536,9 +718,60 @@
                     } catch(e) { return null; }
                     return null;
                 };
+                const searchStruct = async (params) => {
+                    try {
+                        const q = new URLSearchParams({
+                            format: 'json', limit: '1', countrycodes: 'kr', ...params
+                        }).toString();
+                        const url = `https://nominatim.openstreetmap.org/search?${q}`;
+                        const res = await fetch(url);
+                        const data = await res.json();
+                        if (data && data.length > 0) {
+                            const lat = parseFloat(data[0].lat);
+                            const lng = parseFloat(data[0].lon);
+                            if (isNaN(lat) || isNaN(lng)) return null;
+                            return { lat, lng };
+                        }
+                    } catch (e) { return null; }
+                    return null;
+                };
+                const searchBounded = async (query, boxKey = 'incheon') => {
+                    try {
+                        const box = REGION_VIEWBOX[boxKey];
+                        if (!box) return null;
+                        const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=kr&bounded=1&viewbox=${box.left},${box.top},${box.right},${box.bottom}&q=${encodeURIComponent(query)}`;
+                        const res = await fetch(url);
+                        const data = await res.json();
+                        if (data && data.length > 0) {
+                            const lat = parseFloat(data[0].lat);
+                            const lng = parseFloat(data[0].lon);
+                            if (isNaN(lat) || isNaN(lng)) return null;
+                            return { lat, lng };
+                        }
+                    } catch (e) { return null; }
+                    return null;
+                };
 
-                // 전략 1: 전체 주소 검색 (예: "인천 연수구 송도과학로27번길 15")
-                let result = await search(cleanAddr);
+                // 코어 주소 우선 검색: 시/구 + 복합 도로명 + 건물번호까지만
+                {
+                    const coreDisplay = formatAddressDisplay(cleanAddr);
+                    let pre = null;
+                    if (nearRegion) {
+                        pre = await searchBounded(coreDisplay, 'incheon');
+                        if (pre) return pre;
+                    }
+                    pre = await search(coreDisplay + KR_SUFFIX);
+                    if (pre) return pre;
+                }
+
+                // 전략 1: (우선) 지역 경계 제한 전체 주소 검색
+                let result = null;
+                if (nearRegion) {
+                    result = await searchBounded(cleanAddr, 'incheon');
+                    if (result) return result;
+                }
+                // 전략 1b: 전체 주소 일반 검색
+                result = await search(cleanAddr + KR_SUFFIX);
                 if (result) return result;
 
                 // [New] 전략 2: 도로명 주소 파싱 (시/군/구 + 도로명 + 건물번호)
@@ -551,7 +784,7 @@
                 // 토큰 분석
                 let siDo = "";
                 let guGun = "";
-                let roadName = "";
+                let roadParts = [];
                 let buildingNum = "";
 
                 // 역순으로 탐색하여 건물번호, 도로명 식별
@@ -563,8 +796,8 @@
                         continue;
                     }
                     // 로/길로 끝나는지 확인 (도로명)
-                    if (!roadName && (t.endsWith('로') || t.endsWith('길') || t.match(/[로길]\d+번길/))) {
-                        roadName = t;
+                    if ((t.endsWith('로') || t.endsWith('길') || /[로길]\d+번길/.test(t))) {
+                        roadParts.push(t);
                         continue;
                     }
                     // 구/군/시 확인
@@ -579,29 +812,60 @@
                 }
 
                 // 파싱된 조합으로 재검색
-                if (roadName && buildingNum) {
-                    // 조합 1: 시/도 + 구/군 + 도로명 + 건물번호 (Full)
+                if (roadParts.length > 0) {
+                    // 불필요한 꼬리 토큰 제거: 도로명(+번길) 이후 내용은 검색에서 제외
+                    // 건물번호가 있으면 포함, 없으면 도로명만 사용
+                    const roadFull = roadParts.slice().reverse().join(' ');
+                    const coreRoad = buildingNum ? `${roadFull} ${buildingNum}` : `${roadFull}`;
+                    
+                    // [강화] 구조화 검색 (city/county/street)
+                    if (nearRegion) {
+                        const city = '인천';
+                        const county = (cleanAddr.includes('미추홀구') || guGun === '미추홀구') ? '미추홀구'
+                                      : (cleanAddr.includes('중구') || guGun === '중구') ? '중구' : '';
+                        const params = {
+                            street: coreRoad,
+                            city: city,
+                            country: '대한민국'
+                        };
+                        if (county) params.county = county;
+                        result = await searchStruct(params);
+                        if (result && !isFar(result, nearRegion)) return result;
+                    }
+
+                    // 조합 1: 시/도 + 구/군 + 도로명(+건물번호)
                     if (siDo && guGun) {
-                        result = await search(`${siDo} ${guGun} ${roadName} ${buildingNum}`);
+                        result = await search(`${siDo} ${guGun} ${coreRoad}${KR_SUFFIX}`);
                         if (result) return result;
                     }
 
-                    // 조합 2: 구/군 + 도로명 + 건물번호
+                    // 조합 2: 구/군 + 도로명(+건물번호)
                     if (guGun) {
-                        result = await search(`${guGun} ${roadName} ${buildingNum}`);
+                        result = await search(`${guGun} ${coreRoad}${KR_SUFFIX}`);
                         if (result) return result;
                     }
 
-                    // 조합 3: 도로명 + 건물번호 (최후의 수단, 정확도 낮을 수 있음)
-                    result = await search(`${roadName} ${buildingNum}`);
+                    // 조합 3: 지역 프리픽스 + 도로명(+건물번호)
+                    if (regionPrefix) {
+                        result = await search(`${regionPrefix} ${coreRoad}${KR_SUFFIX}`);
+                        if (result) return result;
+                    }
+                    // 일반 검색
+                    result = await search(`${coreRoad}${KR_SUFFIX}`);
                     if (result) return result;
+                    
+                    // [강화] 경계 제한 검색
+                    if (nearRegion) {
+                        result = await searchBounded(coreRoad, 'incheon');
+                        if (result) return result;
+                    }
                 }
 
                 // 전략 3: 상세주소(마지막 어절) 제거 후 검색 (기존 로직 유지)
                 if (tokens.length > 2) { 
                     tokens.pop(); 
                     const lessDetail = tokens.join(' ');
-                    result = await search(lessDetail);
+                    result = await search(lessDetail + KR_SUFFIX);
                     if (result) return result;
                 }
 
@@ -609,7 +873,33 @@
                 if (tokens.length > 2) {
                     tokens.pop();
                     const moreLessDetail = tokens.join(' ');
-                    result = await search(moreLessDetail);
+                    result = await search(moreLessDetail + KR_SUFFIX);
+                    if (result) return result;
+                    // [강화] 경계 제한 넓은 검색
+                    if (nearRegion) {
+                        result = await searchBounded(moreLessDetail, 'incheon');
+                        if (result) return result;
+                    }
+                }
+                
+                // 전략 5: 지역 프리픽스 + 전체 주소 재시도
+                if (regionPrefix) {
+                    result = await search(`${regionPrefix} ${cleanAddr}${KR_SUFFIX}`);
+                    if (result) return result;
+                    // [강화] 경계 제한 전체 주소 재시도
+                    if (nearRegion) {
+                        result = await searchBounded(`${regionPrefix} ${cleanAddr}`, 'incheon');
+                        if (result) return result;
+                    }
+                }
+
+                // 전략 6: 지역 근접성 재시도 (잘못된 도시로 매칭된 경우 교정)
+                if (nearRegion && roadName && buildingNum) {
+                    const forcedRegion = nearRegion === '미추홀구' ? '인천광역시 미추홀구' : '인천광역시';
+                    result = await search(`${forcedRegion} ${roadName} ${buildingNum}${KR_SUFFIX}`);
+                    if (result && !isFar(result, nearRegion)) return result;
+                    // [강화] 경계 제한 버전
+                    result = await searchBounded(`${forcedRegion} ${roadName} ${buildingNum}`, 'incheon');
                     if (result) return result;
                 }
 
@@ -625,6 +915,88 @@
             if (address.includes('대구')) return { lat: 35.8714, lng: 128.6014 }; // 대구시청
             
             return { lat: 37.5665, lng: 126.9780 }; // Default: 서울시청
+        }
+        
+        async function reconcileAllCoordinates(deliveries, setDeliveries) {
+            try {
+                const REGION_CENTERS = {
+                    '인천': { lat: 37.4563, lng: 126.7052 },
+                    '미추홀구': { lat: 37.444, lng: 126.687 },
+                    '중구': { lat: 37.4609, lng: 126.5547 },
+                    '서울': { lat: 37.5665, lng: 126.9780 },
+                    '경기': { lat: 37.2752, lng: 127.0097 },
+                };
+                const inferRegion = (addr) => {
+                    const s = String(addr || '');
+                    if (s.includes('미추홀구')) return '미추홀구';
+                    if (s.includes('중구')) return '중구';
+                    if (s.includes('인천')) return '인천';
+                    if (s.includes('서울')) return '서울';
+                    if (s.includes('경기')) return '경기';
+                    return null;
+                };
+                const isFar = (coords, centerKey, limitKm = 60) => {
+                    if (!coords || !centerKey || !REGION_CENTERS[centerKey]) return false;
+                    const c = REGION_CENTERS[centerKey];
+                    const dist = getDistance(c.lat, c.lng, coords.lat, coords.lng);
+                    return dist > limitKm;
+                };
+                
+                let changed = 0;
+                const updated = [...deliveries];
+                for (let i = 0; i < updated.length; i++) {
+                    const d = updated[i];
+                    const region = inferRegion(d.address);
+                    const hasCoords = d.lat && d.lng && !isNaN(d.lat) && !isNaN(d.lng);
+                    const isDefaultSeoul = hasCoords && d.lat === 37.5665 && d.lng === 126.9780;
+                    
+                    const needsFix =
+                        !hasCoords ||
+                        (region && hasCoords && isFar({ lat: d.lat, lng: d.lng }, region, 50)) ||
+                        (region && isDefaultSeoul && (region === '인천' || region === '미추홀구'));
+                    
+                    if (needsFix) {
+                        let coords = await geocodeAddress(d.address, true);
+                        if (!coords) {
+                            coords = await geocodeAddress(d.address, false);
+                        }
+                        if (coords && (!region || !isFar(coords, region, 50))) {
+                            updated[i] = { ...d, lat: coords.lat, lng: coords.lng };
+                            changed++;
+                        }
+                    }
+                }
+                
+                if (changed > 0) {
+                    setDeliveries(updated);
+                    StorageManager.saveDeliveries(updated);
+                }
+            } catch (e) {
+                console.warn('좌표 자동 보정 실패', e);
+            }
+        }
+        
+        function formatAddressDisplay(address) {
+            if (!address) return '';
+            const s = String(address).trim().replace(/[,\u3001]/g, ' ');
+            const tokens = s.split(/\s+/);
+            let siDo = '';
+            let guGun = '';
+            let roadParts = [];
+            let buildingNum = '';
+            for (let i = tokens.length - 1; i >= 0; i--) {
+                const t = tokens[i];
+                if (!buildingNum && /^\d+(-\d+)?$/.test(t)) { buildingNum = t; continue; }
+                if ((t.endsWith('로') || t.endsWith('길') || /[로길]\d+번길/.test(t))) { roadParts.push(t); continue; }
+                if (!guGun && (t.endsWith('구') || t.endsWith('군') || (t.endsWith('시') && t.length > 2))) { guGun = t; continue; }
+                if (!siDo && (t.endsWith('시') || t.endsWith('도'))) { siDo = t; }
+            }
+            if (roadParts.length > 0) {
+                const roadFull = roadParts.slice().reverse().join(' ');
+                const core = `${siDo ? siDo + ' ' : ''}${guGun ? guGun + ' ' : ''}${roadFull}${buildingNum ? ' ' + buildingNum : ''}`;
+                return core.trim();
+            }
+            return s;
         }
 
         function formatTimeRange(start, minutes) {
@@ -776,7 +1148,7 @@
                             iconAnchor: [15, 15]
                         });
                     const destMarker = L.marker([Number(group.lat), Number(group.lng)], { icon }).addTo(mapInstance.current)
-                         .bindPopup(`<div class="font-bold text-center p-2">🏠 도착지(집)<br/><span class="text-xs text-gray-500">${group.address}</span></div>`);
+                         .bindPopup(`<div class="font-bold text-center p-2">🏠 도착지(집)<br/><span class="text-xs text-gray-500">${formatAddressDisplay(group.address)}</span></div>`);
                         destMarker.off('click');
                         destMarker.on('click', function() {
                             if (this.isPopupOpen()) this.closePopup();
@@ -788,7 +1160,7 @@
                     // [일반 배송지 마커]
                     const icon = L.divIcon({
                         className: 'custom-div-icon',
-                        html: `<div style='background-color:#ef4444; color:white; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-weight:bold; border:2px solid white; box-shadow:1px 1px 3px rgba(0,0,0,0.5);'>${idx + 1}</div>`,
+                        html: `<div style='background-color:#ef4444; color:white; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-weight:bold; border:2px solid white; box-shadow:1px 1px 3px rgba(0,0,0,0.5);'>${group.sequence_number || (idx + 1)}</div>`,
                         iconSize: [24, 24],
                         iconAnchor: [12, 12]
                     });
@@ -803,7 +1175,7 @@
                                 <span class="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">${idx + 1}번</span>
                                 <span class="font-bold text-lg text-gray-800">${group.phone}</span>
                             </div>
-                            <div class="text-sm text-gray-600 mb-1 flex items-center flex-wrap">📍 ${group.address} ${distHtml}</div>
+                            <div class="text-sm text-gray-600 mb-1 flex items-center flex-wrap">📍 ${formatAddressDisplay(group.address)} ${distHtml}</div>
                             <div class="border-t pt-2">
                                 <ul class="list-disc pl-4 text-sm space-y-0.5 text-gray-700">
                                     ${(group.items || []).map(i => `<li>${i.item}</li>`).join('')}
@@ -973,7 +1345,7 @@
                                     🚚 현재 배송 중
                                 </p>
                             )}
-                            <div className="font-semibold text-slate-900 text-sm leading-snug">📍 {item.address}</div>
+                            <div className="font-semibold text-slate-900 text-sm leading-snug">📍 {formatAddressDisplay(item.address)}</div>
                             <div className="text-xs text-slate-500 mt-0.5">📦 {item.item}</div>
                             <div className="text-xs text-slate-500 mt-1">
                                 <a href={`tel:${item.phone}`}>📞 {item.phone || '번호없음'}</a>
@@ -2173,6 +2545,54 @@
                 return () => clearTimeout(timer);
             }, [deliveries]);
 
+            // [긴급] 지도 표시 시 좌표 미확정(active) 건 즉시 지오코딩
+            useEffect(() => {
+                if (!showMap) return;
+                const targets = groupedDeliveries
+                    .filter(g => {
+                        if (!g.is_active) return false;
+                        const invalid = (g.lat == null || g.lng == null || isNaN(Number(g.lat)) || isNaN(Number(g.lng)));
+                        if (invalid) return true;
+                        // 지역 근접성 검사: 인천/미추홀구가 포함되어 있는데 인천 중심에서 너무 멀면 재지오코딩
+                        const addr = g.address || '';
+                        const nearIncheon = addr.includes('인천') || addr.includes('미추홀구');
+                        const roadHint = addr.includes('독정이로');
+                        if (nearIncheon) {
+                            const dist = getDistance(37.4563, 126.7052, Number(g.lat), Number(g.lng));
+                            return dist > 60;
+                        }
+                        if (roadHint) {
+                            const dist = getDistance(37.4563, 126.7052, Number(g.lat), Number(g.lng));
+                            return dist > 60;
+                        }
+                        return false;
+                    })
+                    .slice(0, 20);
+                if (targets.length === 0) return;
+                
+                let cancelled = false;
+                (async () => {
+                    for (const g of targets) {
+                        try {
+                            const coords = await geocodeAddress(g.address, true);
+                            if (cancelled) continue;
+                            let fix = coords;
+                            if (!fix) {
+                                const addr = g.address || '';
+                                const nearIncheon = addr.includes('인천') || addr.includes('미추홀구') || addr.includes('독정이로');
+                                if (nearIncheon) fix = { lat: 37.4563, lng: 126.7052 };
+                            }
+                            if (!fix) continue;
+                            setDeliveries(prev => prev.map(d => 
+                                g.ids.includes(d.id) ? { ...d, lat: fix.lat, lng: fix.lng, needsGeocoding: false } : d
+                            ));
+                        } catch (e) {
+                            // ignore
+                        }
+                    }
+                })();
+                return () => { cancelled = true; };
+            }, [showMap, groupedDeliveries]);
             // [Auto Save] deliveries 변경 시 로컬 스토리지 저장 및 서버 동기화
             useEffect(() => {
                 if (isRemoteUpdate.current) {
@@ -2718,6 +3138,49 @@
                     .sort((a, b) => ((a.sequence_number || 99999) - (b.sequence_number || 99999)));
             }, [deliveries, targetDate, showAllDates, currentUser, view]);
             
+            function deleteDeliveriesByDateRange(startStr, endStr) {
+                try {
+                    const normalize = (s) => parseCustomDate(s);
+                    const start = new Date(normalize(startStr));
+                    const end = new Date(normalize(endStr));
+                    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+                        alert('날짜 범위를 해석할 수 없습니다.');
+                        return;
+                    }
+                    const before = deliveries.length;
+                    const filtered = deliveries.filter(d => {
+                        const ds = normalize(d.date);
+                        const dx = new Date(ds || d.date);
+                        if (isNaN(dx.getTime())) return true;
+                        return dx < start || dx > end;
+                    });
+                    const removed = before - filtered.length;
+                    setDeliveries(filtered);
+                    StorageManager.saveDeliveries(filtered);
+                    setToastMsg(`🗑️ ${removed}건 삭제 ( ${startStr} ~ ${endStr} )`);
+                } catch (e) {
+                    alert('데이터 삭제 중 오류가 발생했습니다.');
+                }
+            }
+            
+            function showDeleteRangePrompt() {
+                const s = prompt('삭제 시작 날짜를 입력하세요 (예: 2026-02-01):');
+                if (!s) return;
+                const e = prompt('삭제 종료 날짜를 입력하세요 (예: 2026-02-16):', s);
+                if (!e) return;
+                if (!confirm(`다음 범위의 데이터를 삭제합니다:\n${s} ~ ${e}\n\n이 작업은 되돌릴 수 없습니다. 진행하시겠습니까?`)) return;
+                deleteDeliveriesByDateRange(s, e);
+            }
+            
+            // 자동 삭제 로직 제거: 사용자가 데이터 재업로드를 원함
+            
+            useEffect(() => {
+                // 지도 노드가 주소와 멀리 떨어져 있거나 좌표가 없을 경우 자동 보정
+                if ((deliveries || []).length > 0) {
+                    reconcileAllCoordinates(deliveries, setDeliveries);
+                }
+            }, [deliveries]);
+            
             // [기능] 비용 업데이트 (기사 입력)
             const updateGroupFees = (ids, field, value) => {
                 let numVal = parseInt(value);
@@ -2764,7 +3227,7 @@
  
                 // 2) 지오코딩 후 좌표 갱신 (성공 시)
                 try {
-                    const coords = await geocodeAddress(newAddress, true);
+                    const coords = await geocodeAddress(formatAddressDisplay(newAddress), true);
                     if (coords) {
                         const updated2 = updated.map(d => {
                             if (ids.includes(d.id)) {
@@ -2778,6 +3241,27 @@
                 } catch (e) {
                     console.warn("주소 좌표 갱신 실패", e);
                 }
+            }
+
+            const geocodeTimersRef = useRef({});
+            function scheduleGroupGeocode(ids, addr) {
+                const key = Array.isArray(ids) ? ids.join('_') : String(ids);
+                const timers = geocodeTimersRef.current;
+                if (timers[key]) clearTimeout(timers[key]);
+                timers[key] = setTimeout(async () => {
+                    try {
+                        const coords = await geocodeAddress(formatAddressDisplay(addr), true);
+                        if (!coords) return;
+                        const updated = deliveries.map(d => {
+                            if (ids.includes(d.id)) {
+                                return { ...d, lat: coords.lat, lng: coords.lng };
+                            }
+                            return d;
+                        });
+                        setDeliveries(updated);
+                        StorageManager.saveDeliveries(updated);
+                    } catch {}
+                }, 600);
             }
 
             // [기능] 네비게이션 및 토스트 메시지
@@ -4004,11 +4488,7 @@ ${logContent}
                                     <button type="button" className="px-2 py-0 rounded-lg bg-transparent text-slate-700 text-[11px] font-bold text-right leading-tight">
                                         <span className="block leading-none text-[10px]">오늘 비용 합계</span>
                                         <span className="block text-[13px] font-black opacity-90">
-                                            {(() => {
-                                                const list = deliveries.filter(d => d.date === targetDate && d.driver === currentUser);
-                                                const total = list.reduce((s, d) => s + (d.install_fee || 0) + ((d.yangjung || 0) + (d.naerim || 0) + (d.etc_fee || 0)), 0);
-                                                return `${total.toLocaleString()}원`;
-                                            })()}
+                                            {`${(totalInstallFeeOnly || 0).toLocaleString()}원`}
                                         </span>
                                     </button>
                                 )}
@@ -4749,6 +5229,54 @@ ${logContent}
                                                     <button onClick={fixCoordinates} className="bg-red-50 text-red-600 py-3 rounded-lg font-bold hover:bg-red-100 transition text-sm border border-red-100">
                                                         🛠 좌표 보정
                                                     </button>
+                                                    <button onClick={async () => {
+                                                        setLoading(true);
+                                                        const removed = await StorageManager.cleanupEphemeral();
+                                                        setLoading(false);
+                                                        alert(`저장소 정리를 완료했습니다.\n정리 항목: ${removed}개\n(검증 리포트/브라우저 캐시 등)\n※ 자동 백업은 유지됩니다.`);
+                                                    }} className="bg-indigo-50 text-indigo-900 py-3 rounded-lg font-bold hover:bg-indigo-100 transition text-sm border border-indigo-200">
+                                                        🧹 저장소 정리
+                                                    </button>
+                                                    <button onClick={async () => {
+                                                        await StorageManager.ensurePersistent();
+                                                    }} className="bg-slate-50 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-sm border border-slate-200">
+                                                        🔒 영구 저장 요청
+                                                    </button>
+                                                    <button onClick={async () => {
+                                                        await StorageManager.showEstimate();
+                                                    }} className="bg-slate-50 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-sm border border-slate-200">
+                                                        💾 사용량 확인
+                                                    </button>
+                                                    <button onClick={() => {
+                                                        const settings = StorageManager.get(Config.STORAGE_KEYS.SETTINGS) || {};
+                                                        const daysStr = prompt('클라우드에 유지할 최근 일수 입력 (예: 60):', String(settings.cloud_compact_days || 60));
+                                                        if (!daysStr) return;
+                                                        const days = parseInt(daysStr, 10);
+                                                        if (isNaN(days) || days <= 0) {
+                                                            alert('유효한 숫자를 입력하세요.');
+                                                            return;
+                                                        }
+                                                        const enable = confirm(`클라우드 데이터를 최근 ${days}일만 유지하도록 경량화합니다.\n서버의 이전 데이터는 덮어씌워질 수 있습니다. 진행하시겠습니까?`);
+                                                        if (!enable) return;
+                                                        const next = { ...(settings || {}), cloud_compact_enabled: true, cloud_compact_days: days };
+                                                        StorageManager.set(Config.STORAGE_KEYS.SETTINGS, next);
+                                                        alert('클라우드 경량화 설정이 적용되었습니다. 다음 저장부터 반영됩니다.');
+                                                    }} className="bg-amber-50 text-amber-800 py-3 rounded-lg font-bold hover:bg-amber-100 transition text-sm border border-amber-200">
+                                                        ☁️ 클라우드 경량화 설정
+                                                    </button>
+                                                    <button onClick={() => {
+                                                        const settings = StorageManager.get(Config.STORAGE_KEYS.SETTINGS) || {};
+                                                        const daysStr = prompt('아카이브로 내보낼 기준: 최근 일수 (예: 60). 입력한 일수보다 오래된 데이터를 내보냅니다.', String(settings.cloud_compact_days || 60));
+                                                        if (!daysStr) return;
+                                                        const days = parseInt(daysStr, 10);
+                                                        if (isNaN(days) || days <= 0) {
+                                                            alert('유효한 숫자를 입력하세요.');
+                                                            return;
+                                                        }
+                                                        StorageManager.exportArchive(deliveries, days);
+                                                    }} className="bg-slate-50 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-sm border border-slate-200">
+                                                        📦 아카이브 내보내기
+                                                    </button>
                                                      
                                                     <button onClick={() => {
                                                         const backupList = StorageManager.get('mvp_backup_list') || [];
@@ -4808,6 +5336,7 @@ ${logContent}
                                         <div className="flex justify-end gap-1 bg-slate-100 p-1 rounded-lg self-end">
                                              <button onClick={() => setCustomerViewMode('daily')} className={`px-3 py-1 text-xs font-bold rounded-md transition ${customerViewMode === 'daily' ? 'bg-white shadow text-indigo-900' : 'text-gray-500 hover:text-gray-700'}`}>일별</button>
                                              <button onClick={() => setCustomerViewMode('monthly')} className={`px-3 py-1 text-xs font-bold rounded-md transition ${customerViewMode === 'monthly' ? 'bg-white shadow text-indigo-900' : 'text-gray-500 hover:text-gray-700'}`}>월별</button>
+                                             <button onClick={showDeleteRangePrompt} className="px-3 py-1 text-xs font-bold rounded-md transition bg-red-50 text-red-700 border border-red-200 hover:bg-red-100">데이터 삭제</button>
                                         </div>
                                         
                                         {/* [New] 검색 필터 */}
@@ -5313,7 +5842,10 @@ ${logContent}
                                                                     rows={2}
                                                                     className="w-full bg-transparent border-0 p-0 text-[11px] leading-snug font-semibold text-slate-800 focus:outline-none focus:ring-0 whitespace-pre-wrap break-words resize-none" 
                                                                     value={group.address || ''} 
-                                                                    onChange={(e) => updateGroupContact(group.ids, { address: e.target.value })}
+                                                                    onChange={(e) => { 
+                                                                        updateGroupContact(group.ids, { address: e.target.value });
+                                                                        scheduleGroupGeocode(group.ids, e.target.value);
+                                                                    }}
                                                                     onBlur={(e) => updateGroupAddress(group.ids, e.target.value)}
                                                                     placeholder="주소 입력"
                                                                 />
@@ -5321,7 +5853,7 @@ ${logContent}
                                                         </div>
                                                     </div>
                                                 ) : (
-                                                    <div className="address">📍 {group.address}</div>
+                                                    <div className="address">📍 {formatAddressDisplay(group.address)}</div>
                                                 )}
                                                 <div className="border-t border-slate-200 my-2"></div>
                                                 
@@ -5543,6 +6075,11 @@ ${logContent}
                                         <button onClick={() => handleCloudSync('push')} className="col-span-2 bg-white text-indigo-900 py-3 rounded-lg font-bold hover:bg-sky-50 transition text-sm border border-indigo-200 flex items-center justify-center gap-2 mb-2">
                                             <span className="text-xl">☁️</span>
                                             <span>작업 결과 서버에 저장</span>
+                                        </button>
+
+                                        <button onClick={showDeleteRangePrompt} className="col-span-2 bg-red-50 text-red-700 py-3 rounded-lg font-bold hover:bg-red-100 transition text-sm border border-red-200 flex items-center justify-center gap-2">
+                                            <span className="text-xl">🗑️</span>
+                                            <span>데이터 삭제</span>
                                         </button>
 
                                         <button onClick={() => {
