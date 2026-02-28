@@ -635,7 +635,7 @@
         async function geocodeAddress(address, strict = false) {
             // [안전장치] 주소 유효성 검사
             if (!address || typeof address !== 'string') {
-                return strict ? null : { lat: 37.5665, lng: 126.9780 };
+                return null;
             }
 
             try {
@@ -678,21 +678,27 @@
                 const KR_SUFFIX = ' 대한민국';
                 const REGION_CENTERS = {
                     '인천': { lat: 37.4563, lng: 126.7052 },
-                    '미추홀구': { lat: 37.444, lng: 126.687 }, // 대략 미추홀구 중심
-                    '중구': { lat: 37.4609, lng: 126.5547 }, // 인천 중구(영종) 대략 중심
+                    '미추홀구': { lat: 37.444, lng: 126.687 },
+                    '중구': { lat: 37.4609, lng: 126.5547 },
+                    '김포시': { lat: 37.6153, lng: 126.7150 }
                 };
                 const REGION_VIEWBOX = {
-                    // viewbox: left,top,right,bottom (lon,lat,lon,lat)
-                    incheon: { left: 126.52, top: 37.55, right: 126.80, bottom: 37.30 }
+                    incheon: { left: 126.52, top: 37.55, right: 126.80, bottom: 37.30 },
+                    gimpo: { left: 126.55, top: 37.75, right: 126.85, bottom: 37.50 }
                 };
                 const nearRegion = (() => {
                     if (cleanAddr.includes('미추홀구')) return '미추홀구';
                     if (cleanAddr.includes('중구')) return '중구';
                     if (cleanAddr.includes('인천')) return '인천';
-                    // 도로명 힌트
+                    if (cleanAddr.includes('김포시') || cleanAddr.includes('김포')) return '김포시';
                     for (const road in roadToRegion) {
                         if (cleanAddr.includes(road)) return roadToRegion[road];
                     }
+                    return null;
+                })();
+                const boxKey = (() => {
+                    if (nearRegion === '미추홀구' || nearRegion === '중구' || nearRegion === '인천') return 'incheon';
+                    if (nearRegion === '김포시') return 'gimpo';
                     return null;
                 })();
                 const isFar = (coords, centerKey, limitKm = 60) => {
@@ -705,9 +711,13 @@
                 // 도우미 함수: Nominatim 검색
                 const search = async (query) => {
                     try {
-                        // console.log("Searching:", query); // Debug
                         const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=kr&q=${encodeURIComponent(query)}`;
-                        const res = await fetch(url);
+                        let res = await fetch(url);
+                        if (res.status === 429) {
+                            await new Promise(r => setTimeout(r, 1200));
+                            res = await fetch(url);
+                        }
+                        if (!res.ok) return null;
                         const data = await res.json();
                         if (data && data.length > 0) {
                             const lat = parseFloat(data[0].lat);
@@ -724,7 +734,12 @@
                             format: 'json', limit: '1', countrycodes: 'kr', ...params
                         }).toString();
                         const url = `https://nominatim.openstreetmap.org/search?${q}`;
-                        const res = await fetch(url);
+                        let res = await fetch(url);
+                        if (res.status === 429) {
+                            await new Promise(r => setTimeout(r, 1200));
+                            res = await fetch(url);
+                        }
+                        if (!res.ok) return null;
                         const data = await res.json();
                         if (data && data.length > 0) {
                             const lat = parseFloat(data[0].lat);
@@ -740,7 +755,12 @@
                         const box = REGION_VIEWBOX[boxKey];
                         if (!box) return null;
                         const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=kr&bounded=1&viewbox=${box.left},${box.top},${box.right},${box.bottom}&q=${encodeURIComponent(query)}`;
-                        const res = await fetch(url);
+                        let res = await fetch(url);
+                        if (res.status === 429) {
+                            await new Promise(r => setTimeout(r, 1200));
+                            res = await fetch(url);
+                        }
+                        if (!res.ok) return null;
                         const data = await res.json();
                         if (data && data.length > 0) {
                             const lat = parseFloat(data[0].lat);
@@ -756,8 +776,17 @@
                 {
                     const coreDisplay = formatAddressDisplay(cleanAddr);
                     let pre = null;
-                    if (nearRegion) {
-                        pre = await searchBounded(coreDisplay, 'incheon');
+                    if (boxKey) {
+                        pre = await searchBounded(coreDisplay, boxKey);
+                        if (pre) return pre;
+                    }
+                    if (regionPrefix) {
+                        if (boxKey) {
+                            pre = await searchBounded(`${regionPrefix} ${coreDisplay}`, boxKey);
+                            if (pre) return pre;
+                        }
+                        if (pre) return pre;
+                        pre = await search(`${regionPrefix} ${coreDisplay}${KR_SUFFIX}`);
                         if (pre) return pre;
                     }
                     pre = await search(coreDisplay + KR_SUFFIX);
@@ -766,8 +795,8 @@
 
                 // 전략 1: (우선) 지역 경계 제한 전체 주소 검색
                 let result = null;
-                if (nearRegion) {
-                    result = await searchBounded(cleanAddr, 'incheon');
+                if (boxKey) {
+                    result = await searchBounded(cleanAddr, boxKey);
                     if (result) return result;
                 }
                 // 전략 1b: 전체 주소 일반 검색
@@ -855,8 +884,8 @@
                     if (result) return result;
                     
                     // [강화] 경계 제한 검색
-                    if (nearRegion) {
-                        result = await searchBounded(coreRoad, 'incheon');
+                    if (boxKey) {
+                        result = await searchBounded(coreRoad, boxKey);
                         if (result) return result;
                     }
                 }
@@ -876,8 +905,8 @@
                     result = await search(moreLessDetail + KR_SUFFIX);
                     if (result) return result;
                     // [강화] 경계 제한 넓은 검색
-                    if (nearRegion) {
-                        result = await searchBounded(moreLessDetail, 'incheon');
+                    if (boxKey) {
+                        result = await searchBounded(moreLessDetail, boxKey);
                         if (result) return result;
                     }
                 }
@@ -886,94 +915,19 @@
                 if (regionPrefix) {
                     result = await search(`${regionPrefix} ${cleanAddr}${KR_SUFFIX}`);
                     if (result) return result;
-                    // [강화] 경계 제한 전체 주소 재시도
-                    if (nearRegion) {
-                        result = await searchBounded(`${regionPrefix} ${cleanAddr}`, 'incheon');
+                    if (boxKey) {
+                        result = await searchBounded(`${regionPrefix} ${cleanAddr}`, boxKey);
                         if (result) return result;
                     }
                 }
 
-                // 전략 6: 지역 근접성 재시도 (잘못된 도시로 매칭된 경우 교정)
-                if (nearRegion && roadName && buildingNum) {
-                    const forcedRegion = nearRegion === '미추홀구' ? '인천광역시 미추홀구' : '인천광역시';
-                    result = await search(`${forcedRegion} ${roadName} ${buildingNum}${KR_SUFFIX}`);
-                    if (result && !isFar(result, nearRegion)) return result;
-                    // [강화] 경계 제한 버전
-                    result = await searchBounded(`${forcedRegion} ${roadName} ${buildingNum}`, 'incheon');
-                    if (result) return result;
+                if (!strict) {
+                    if (cleanAddr.includes('김포시') || cleanAddr.includes('김포')) return REGION_CENTERS['김포시'];
+                    if (cleanAddr.includes('인천')) return REGION_CENTERS['인천'];
                 }
 
             } catch (e) { console.error("Geocoding failed", e); }
-            
-            // Strict 모드일 경우 Fallback 사용 안 함
-            if (strict) return null;
-
-            // [Fallback] 실패 시 지역별 기본 좌표 반환 (서울 쏠림 방지)
-            if (address.includes('인천')) return { lat: 37.4563, lng: 126.7052 }; // 인천시청
-            if (address.includes('경기')) return { lat: 37.2752, lng: 127.0097 }; // 경기도청
-            if (address.includes('부산')) return { lat: 35.1796, lng: 129.0756 }; // 부산시청
-            if (address.includes('대구')) return { lat: 35.8714, lng: 128.6014 }; // 대구시청
-            
-            return { lat: 37.5665, lng: 126.9780 }; // Default: 서울시청
-        }
-        
-        async function reconcileAllCoordinates(deliveries, setDeliveries) {
-            try {
-                const REGION_CENTERS = {
-                    '인천': { lat: 37.4563, lng: 126.7052 },
-                    '미추홀구': { lat: 37.444, lng: 126.687 },
-                    '중구': { lat: 37.4609, lng: 126.5547 },
-                    '서울': { lat: 37.5665, lng: 126.9780 },
-                    '경기': { lat: 37.2752, lng: 127.0097 },
-                };
-                const inferRegion = (addr) => {
-                    const s = String(addr || '');
-                    if (s.includes('미추홀구')) return '미추홀구';
-                    if (s.includes('중구')) return '중구';
-                    if (s.includes('인천')) return '인천';
-                    if (s.includes('서울')) return '서울';
-                    if (s.includes('경기')) return '경기';
-                    return null;
-                };
-                const isFar = (coords, centerKey, limitKm = 60) => {
-                    if (!coords || !centerKey || !REGION_CENTERS[centerKey]) return false;
-                    const c = REGION_CENTERS[centerKey];
-                    const dist = getDistance(c.lat, c.lng, coords.lat, coords.lng);
-                    return dist > limitKm;
-                };
-                
-                let changed = 0;
-                const updated = [...deliveries];
-                for (let i = 0; i < updated.length; i++) {
-                    const d = updated[i];
-                    const region = inferRegion(d.address);
-                    const hasCoords = d.lat && d.lng && !isNaN(d.lat) && !isNaN(d.lng);
-                    const isDefaultSeoul = hasCoords && d.lat === 37.5665 && d.lng === 126.9780;
-                    
-                    const needsFix =
-                        !hasCoords ||
-                        (region && hasCoords && isFar({ lat: d.lat, lng: d.lng }, region, 50)) ||
-                        (region && isDefaultSeoul && (region === '인천' || region === '미추홀구'));
-                    
-                    if (needsFix) {
-                        let coords = await geocodeAddress(d.address, true);
-                        if (!coords) {
-                            coords = await geocodeAddress(d.address, false);
-                        }
-                        if (coords && (!region || !isFar(coords, region, 50))) {
-                            updated[i] = { ...d, lat: coords.lat, lng: coords.lng };
-                            changed++;
-                        }
-                    }
-                }
-                
-                if (changed > 0) {
-                    setDeliveries(updated);
-                    StorageManager.saveDeliveries(updated);
-                }
-            } catch (e) {
-                console.warn('좌표 자동 보정 실패', e);
-            }
+            return null;
         }
         
         function formatAddressDisplay(address) {
@@ -1092,28 +1046,30 @@
             const mapRef = useRef(null);
             const mapInstance = useRef(null);
             const polylineRef = useRef(null);
+            const geoCacheRef = useRef({});
+            const isValid = (p) => {
+                if (!p || p.lat == null || p.lng == null) return false;
+                const lat = Number(p.lat);
+                const lng = Number(p.lng);
+                return !isNaN(lat) && !isNaN(lng);
+            };
 
             useEffect(() => {
                 if (!mapRef.current) return;
-                const isValid = (p) => {
-                    if (!p || p.lat == null || p.lng == null) return false;
-                    const lat = Number(p.lat);
-                    const lng = Number(p.lng);
-                    return !isNaN(lat) && !isNaN(lng);
-                };
-                const fallbackCenter = { lat: 37.5665, lng: 126.9780 };
-                const safeCenter = isValid(center) ? { lat: Number(center.lat), lng: Number(center.lng) } : fallbackCenter;
-
-                // 초기화
                 if (!mapInstance.current) {
                     mapInstance.current = L.map(mapRef.current, {
-                        zoomControl: false // [수정] 줌 컨트롤(+/-) 제거
-                    }).setView([safeCenter.lat, safeCenter.lng], 12);
+                        zoomControl: false
+                    }).setView([36.5, 127.8], 7);
                     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' }).addTo(mapInstance.current);
-                } else {
-                    mapInstance.current.setView([safeCenter.lat, safeCenter.lng], 12);
                 }
 
+                let orderCounter = 0;
+                let prevLatLng = isValid(startPoint) ? [Number(startPoint.lat), Number(startPoint.lng)] : null;
+                let currBearing = null;
+                let destLatLng = null;
+                const TURN_PENALTY = 0.4;
+                const DEST_WEIGHT = 0.6;
+                const routeLatLngs = [];
                 // 마커 클리어
                 mapInstance.current.eachLayer(layer => {
                     if (layer instanceof L.Marker || layer instanceof L.Polyline) mapInstance.current.removeLayer(layer);
@@ -1132,14 +1088,13 @@
                         if (this.isPopupOpen()) this.closePopup();
                         else this.openPopup();
                     });
+                    routeLatLngs.push([Number(startPoint.lat), Number(startPoint.lng)]);
                 }
 
-                // 2. 배송지 및 도착지 마커
-                locations.forEach((group, idx) => {
-                    // [안전장치] 좌표 유효성 검사
-                    if (!group.lat || !group.lng || isNaN(group.lat) || isNaN(group.lng)) return;
-
-                    // [도착지(집) 마커]
+                // 2. 배송지 및 도착지 마커 (근접 순서 번호 부여)
+                const missing = [];
+                const known = [];
+                locations.forEach((group) => {
                     if (group.type === 'destination') {
                         const icon = L.divIcon({
                             className: 'custom-div-icon',
@@ -1147,33 +1102,60 @@
                             iconSize: [30, 30],
                             iconAnchor: [15, 15]
                         });
-                    const destMarker = L.marker([Number(group.lat), Number(group.lng)], { icon }).addTo(mapInstance.current)
-                         .bindPopup(`<div class="font-bold text-center p-2">🏠 도착지(집)<br/><span class="text-xs text-gray-500">${formatAddressDisplay(group.address)}</span></div>`);
+                        const dlat = Number(group.lat), dlng = Number(group.lng);
+                        const destMarker = L.marker([dlat, dlng], { icon }).addTo(mapInstance.current)
+                            .bindPopup(`<div class="font-bold text-center p-2">🏠 도착지(집)<br/><span class="text-xs text-gray-500">${formatAddressDisplay(group.address)}</span></div>`);
                         destMarker.off('click');
-                        destMarker.on('click', function() {
-                            if (this.isPopupOpen()) this.closePopup();
-                            else this.openPopup();
-                        });
+                        destMarker.on('click', function() { if (this.isPopupOpen()) this.closePopup(); else this.openPopup(); });
+                        if (!isNaN(dlat) && !isNaN(dlng)) destLatLng = [dlat, dlng];
                         return;
                     }
-
-                    // [일반 배송지 마커]
+                    if (!group.lat || !group.lng || isNaN(group.lat) || isNaN(group.lng)) { missing.push(group); return; }
+                    known.push(group);
+                });
+                while (known.length > 0) {
+                    let pickIdx = 0;
+                    if (prevLatLng) {
+                        let best = Infinity;
+                        for (let i = 0; i < known.length; i++) {
+                            const nx = Number(known[i].lat), ny = Number(known[i].lng);
+                            const d = getDistance(prevLatLng[0], prevLatLng[1], nx, ny);
+                            let cost = d;
+                            if (currBearing != null) {
+                                const r = Math.PI / 180;
+                                const y = Math.sin((ny - prevLatLng[1]) * r) * Math.cos(nx * r);
+                                const x = Math.cos(prevLatLng[0] * r) * Math.cos(nx * r) * Math.cos((ny - prevLatLng[1]) * r) - Math.sin(prevLatLng[0] * r) * Math.sin(nx * r);
+                                let b = Math.atan2(y, x) * 180 / Math.PI; if (b < 0) b += 360;
+                                let diff = Math.abs(b - currBearing) % 360; if (diff > 180) diff = 360 - diff;
+                                cost = d + TURN_PENALTY * (diff / 90);
+                            }
+                            if (destLatLng) {
+                                const rem = known.length;
+                                const w = rem <= 3 ? DEST_WEIGHT : DEST_WEIGHT * 0.2;
+                                const dd = getDistance(nx, ny, destLatLng[0], destLatLng[1]);
+                                cost += w * dd;
+                            }
+                            if (cost < best) { best = cost; pickIdx = i; }
+                        }
+                    }
+                    const group = known.splice(pickIdx, 1)[0];
                     const icon = L.divIcon({
                         className: 'custom-div-icon',
-                        html: `<div style='background-color:#ef4444; color:white; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-weight:bold; border:2px solid white; box-shadow:1px 1px 3px rgba(0,0,0,0.5);'>${group.sequence_number || (idx + 1)}</div>`,
+                        html: `<div style='background-color:#ef4444; color:white; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-weight:bold; border:2px solid white; box-shadow:1px 1px 3px rgba(0,0,0,0.5);'>${orderCounter + 1}</div>`,
                         iconSize: [24, 24],
                         iconAnchor: [12, 12]
                     });
-                    
-                    // [수정] 거리 계산 및 표시 (지도 팝업)
-                    const dist = startPoint ? getDistance(startPoint.lat, startPoint.lng, group.lat, group.lng).toFixed(1) : null;
-                    const distHtml = dist ? `<span class="text-xs font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 ml-1 whitespace-nowrap">${dist}km</span>` : '';
-
+                    let distKm = null;
+                    if (prevLatLng) {
+                        const dk = getDistance(prevLatLng[0], prevLatLng[1], Number(group.lat), Number(group.lng));
+                        if (Number.isFinite(dk)) distKm = dk.toFixed(1);
+                    }
+                    const distHtml = distKm ? `<span class="text-xs font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 ml-1 whitespace-nowrap">${distKm}km</span>` : '';
                     const popupContent = `
                         <div class="p-2 min-w-[200px]">
                             <div class="flex items-center gap-2 mb-2">
-                                <span class="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">${idx + 1}번</span>
-                                <span class="font-bold text-lg text-gray-800">${group.phone}</span>
+                                <span class="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">${orderCounter + 1}번</span>
+                                <span class="font-bold text-lg text-gray-800">${group.phone || ''}</span>
                             </div>
                             <div class="text-sm text-gray-600 mb-1 flex items-center flex-wrap">📍 ${formatAddressDisplay(group.address)} ${distHtml}</div>
                             <div class="border-t pt-2">
@@ -1181,41 +1163,167 @@
                                     ${(group.items || []).map(i => `<li>${i.item}</li>`).join('')}
                                 </ul>
                                 <div class="flex gap-1 mt-2">
-                                    <button onclick="window.handleAppNavigation(${group.lat}, ${group.lng}, '${group.address.replace(/'/g, "\\'")}')" class="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-2 rounded-lg flex items-center justify-center transition shadow-sm text-xs">
-                                        배송출발
-                                    </button>
-                                    <button onclick="window.handlePopupSequenceChange('${group.ids.join(',')}')" class="flex-1 bg-sky-500 hover:bg-indigo-600 text-white font-bold py-2 rounded-lg flex items-center justify-center transition shadow-sm text-xs">
-                                        순서변경
-                                    </button>
-                                    <button onclick="document.querySelector('.leaflet-popup-close-button').click()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 rounded-lg flex items-center justify-center transition shadow-sm text-xs">
-                                        닫기
-                                    </button>
+                                    <button onclick="window.handleAppNavigation(${group.lat}, ${group.lng}, '${(group.address || '').replace(/'/g, "\\'")}')" class="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-2 rounded-lg flex items-center justify-center transition shadow-sm text-xs">배송출발</button>
+                                    <button onclick="window.handlePopupSequenceChange('${(group.ids || []).join(',')}')" class="flex-1 bg-sky-500 hover:bg-indigo-600 text-white font-bold py-2 rounded-lg flex items-center justify-center transition shadow-sm text-xs">순서변경</button>
+                                    <button onclick="document.querySelector('.leaflet-popup-close-button').click()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 rounded-lg flex items-center justify-center transition shadow-sm text-xs">닫기</button>
                                 </div>
                             </div>
                         </div>
                     `;
                     const marker = L.marker([Number(group.lat), Number(group.lng)], { icon }).addTo(mapInstance.current).bindPopup(popupContent);
-                    marker.off('click');
-                    marker.on('click', function() {
-                        if (this.isPopupOpen()) {
-                            this.closePopup();
-                        } else {
-                            this.openPopup();
-                        }
-                    });
-                });
+                    const current = [Number(group.lat), Number(group.lng)];
+                    if (prevLatLng) L.polyline([prevLatLng, current], { color: '#2563eb', weight: 4, opacity: 0.7, dashArray: '10, 10' }).addTo(mapInstance.current);
+                    prevLatLng = current;
+                    routeLatLngs.push(current);
+                    {
+                        const r = Math.PI / 180, a1 = prevLatLng[0] * r, b1 = prevLatLng[1] * r, a2 = Number(group.lat) * r, b2 = Number(group.lng) * r;
+                        const y = Math.sin(b2 - b1) * Math.cos(a2);
+                        const x = Math.cos(a1) * Math.cos(a2) * Math.cos(b2 - b1) - Math.sin(a1) * Math.sin(a2);
+                        let b = Math.atan2(y, x) * 180 / Math.PI; if (b < 0) b += 360;
+                        currBearing = b;
+                    }
+                    orderCounter++;
+                    marker.off('click'); marker.on('click', function() { if (this.isPopupOpen()) this.closePopup(); else this.openPopup(); });
+                }
+                // 마지막은 pending 처리 후 일괄 그리기
 
-                // 3. 경로 선 그리기
+                if (missing.length > 0) {
+                    (async () => {
+                        const bounds = [];
+                        if (startPoint && !isNaN(Number(startPoint.lat)) && !isNaN(Number(startPoint.lng))) {
+                            bounds.push([Number(startPoint.lat), Number(startPoint.lng)]);
+                        }
+                        const pending = [];
+                        for (const group of missing) {
+                            const key = String(group.address || '').trim();
+                            let c = geoCacheRef.current[key];
+                            if (!c) {
+                                const addr = formatAddressDisplay(group.address || '');
+                                c = await geocodeAddress(addr, true) || await geocodeAddress(addr, false);
+                                if (c) geoCacheRef.current[key] = c;
+                            }
+                            let fromFallback = false;
+                            if (!c) {
+                                const a = (group.address || '');
+                                if (a.includes('인천')) { c = { lat: 37.4563, lng: 126.7052 }; fromFallback = true; }
+                                else if (a.includes('서울')) { c = { lat: 37.5665, lng: 126.9780 }; fromFallback = true; }
+                                else { c = { lat: 36.5, lng: 127.8 }; fromFallback = true; }
+                            }
+                            if (c) {
+                                let latNum = Number(c.lat);
+                                let lngNum = Number(c.lng);
+                                const isFallbackCoord = (la, ln) => (
+                                    (Math.abs(la - 37.4563) < 1e-6 && Math.abs(ln - 126.7052) < 1e-6) ||
+                                    (Math.abs(la - 37.5665) < 1e-6 && Math.abs(ln - 126.9780) < 1e-6) ||
+                                    (Math.abs(la - 36.5) < 1e-6 && Math.abs(ln - 127.8) < 1e-6)
+                                );
+                                if (fromFallback || isFallbackCoord(latNum, lngNum)) {
+                                    const s = String(group.address || '');
+                                    let h = 0; for (let i = 0; i < s.length; i++) { h = ((h * 31) + s.charCodeAt(i)) >>> 0; }
+                                    const dLat = ((h % 21) - 10) * 0.0009;
+                                    const dLng = ((((h >> 5) % 21) - 10) * 0.0009);
+                                    latNum += dLat; lngNum += dLng;
+                                }
+                                pending.push({ group, lat: latNum, lng: lngNum });
+                            }
+                        }
+                        while (pending.length > 0) {
+                            let pickIdx = 0;
+                            if (prevLatLng) {
+                                let best = Infinity;
+                                for (let i = 0; i < pending.length; i++) {
+                                    const cand = pending[i];
+                                    const d = getDistance(prevLatLng[0], prevLatLng[1], cand.lat, cand.lng);
+                                    let cost = d;
+                                    if (currBearing != null) {
+                                        const r = Math.PI / 180;
+                                        const y = Math.sin((cand.lng - prevLatLng[1]) * r) * Math.cos(cand.lat * r);
+                                        const x = Math.cos(prevLatLng[0] * r) * Math.cos(cand.lat * r) * Math.cos((cand.lng - prevLatLng[1]) * r) - Math.sin(prevLatLng[0] * r) * Math.sin(cand.lat * r);
+                                        let b = Math.atan2(y, x) * 180 / Math.PI; if (b < 0) b += 360;
+                                        let diff = Math.abs(b - currBearing) % 360; if (diff > 180) diff = 360 - diff;
+                                        cost = d + TURN_PENALTY * (diff / 90);
+                                    }
+                                    if (destLatLng) {
+                                        const rem = pending.length;
+                                        const w = rem <= 3 ? DEST_WEIGHT : DEST_WEIGHT * 0.2;
+                                        const dd = getDistance(cand.lat, cand.lng, destLatLng[0], destLatLng[1]);
+                                        cost += w * dd;
+                                    }
+                                    if (cost < best) { best = cost; pickIdx = i; }
+                                }
+                            }
+                            const { group, lat, lng } = pending.splice(pickIdx, 1)[0];
+                            const icon = L.divIcon({
+                                className: 'custom-div-icon',
+                                html: `<div style='background-color:#ef4444; color:white; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-weight:bold; border:2px solid white; box-shadow:1px 1px 3px rgba(0,0,0,0.5);'>${orderCounter + 1}</div>`,
+                                iconSize: [24, 24],
+                                iconAnchor: [12, 12]
+                            });
+                            let distKm = null;
+                            if (prevLatLng) {
+                                const dk = getDistance(prevLatLng[0], prevLatLng[1], lat, lng);
+                                if (Number.isFinite(dk)) distKm = dk.toFixed(1);
+                            }
+                            const distHtml = distKm ? `<span class="text-xs font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 ml-1 whitespace-nowrap">${distKm}km</span>` : '';
+                            const popupContent = `
+                                <div class="p-2 min-w-[200px]">
+                                    <div class="text-sm text-gray-600 mb-1 flex items-center flex-wrap">📍 ${formatAddressDisplay(group.address)} ${distHtml}</div>
+                                    <div class="border-t pt-2">
+                                        <div class="flex gap-1 mt-2">
+                                            <button onclick="window.handleAppNavigation(${lat}, ${lng}, '${(group.address || '').replace(/'/g, "\\'")}')" class="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-2 rounded-lg flex items-center justify-center transition shadow-sm text-xs">
+                                                배송출발
+                                            </button>
+                                            <button onclick="window.handlePopupSequenceChange('${Array.isArray(group.ids) ? group.ids.join(',') : (group.id != null ? String(group.id) : '')}')" class="flex-1 bg-sky-500 hover:bg-indigo-600 text-white font-bold py-2 rounded-lg flex items-center justify-center transition shadow-sm text-xs">
+                                                순서변경
+                                            </button>
+                                            <button onclick="document.querySelector('.leaflet-popup-close-button').click()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 rounded-lg flex items-center justify-center transition shadow-sm text-xs">
+                                                닫기
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                            L.marker([lat, lng], { icon }).addTo(mapInstance.current).bindPopup(popupContent);
+                            if (prevLatLng) {
+                                L.polyline([prevLatLng, [lat, lng]], { color: '#2563eb', weight: 4, opacity: 0.7, dashArray: '10, 10' }).addTo(mapInstance.current);
+                            }
+                            {
+                                const r = Math.PI / 180, a1 = (prevLatLng ? prevLatLng[0] : lat) * r, b1 = (prevLatLng ? prevLatLng[1] : lng) * r, a2 = lat * r, b2 = lng * r;
+                                const y = Math.sin(b2 - b1) * Math.cos(a2);
+                                const x = Math.cos(a1) * Math.cos(a2) * Math.cos(b2 - b1) - Math.sin(a1) * Math.sin(a2);
+                                let b = Math.atan2(y, x) * 180 / Math.PI; if (b < 0) b += 360;
+                                currBearing = b;
+                            }
+                            prevLatLng = [lat, lng];
+                            routeLatLngs.push([lat, lng]);
+                            orderCounter++;
+                            bounds.push([lat, lng]);
+                        }
+                        // 전체 경로 초록 실선 (출발지 → 모든 배송지 → 도착지)
+                        if (destLatLng) {
+                            routeLatLngs.push(destLatLng);
+                        }
+                        if (routeLatLngs.length >= 2) {
+                            L.polyline(routeLatLngs, { color: '#10b981', weight: 4, opacity: 0.85 }).addTo(mapInstance.current);
+                        }
+                        if (bounds.length > 0) {
+                            mapInstance.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+                        }
+                    })();
+                }
+
+                
+                // 4. 화면 맞춤 (유효 좌표가 있을 때만)
                 {
-                    const latlngs = [];
-                    if (isValid(startPoint)) latlngs.push([Number(startPoint.lat), Number(startPoint.lng)]);
+                    const bounds = [];
+                    if (isValid(startPoint)) bounds.push([Number(startPoint.lat), Number(startPoint.lng)]);
                     locations.forEach(l => {
                         const lat = Number(l?.lat);
                         const lng = Number(l?.lng);
-                        if (!isNaN(lat) && !isNaN(lng)) latlngs.push([lat, lng]);
+                        if (!isNaN(lat) && !isNaN(lng)) bounds.push([lat, lng]);
                     });
-                    if (latlngs.length >= 2) {
-                        L.polyline(latlngs, { color: '#2563eb', weight: 4, opacity: 0.7, dashArray: '10, 10' }).addTo(mapInstance.current);
+                    if (bounds.length > 0) {
+                        mapInstance.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
                     }
                 }
 
@@ -2120,7 +2228,8 @@
                             const currentEndAddr = endPoint ? endPoint.address : "";
                             const endAddr = prompt("도착지(홈) 주소를 입력하세요:", currentEndAddr || addr);
                             if (endAddr) {
-                                const endCoords = await geocodeAddress(endAddr, true);
+                                let endCoords = await geocodeAddress(endAddr, true);
+                                if (!endCoords) endCoords = await geocodeAddress(endAddr, false);
                                 if (endCoords) {
                                     const newEndPoint = { address: endAddr, lat: endCoords.lat, lng: endCoords.lng, type: 'destination' };
                                     setEndPoint(newEndPoint);
@@ -2173,8 +2282,8 @@
                 
                 try {
                     setLoading(true);
-                    // Strict Mode 사용
-                    const coords = await geocodeAddress(addr, true);
+                    let coords = await geocodeAddress(addr, true);
+                    if (!coords) coords = await geocodeAddress(addr, false);
                     if (coords) {
                         const newPoint = { address: addr, lat: coords.lat, lng: coords.lng, type: 'destination' };
                         setEndPoint(newPoint);
@@ -2502,97 +2611,9 @@
                 }
             }, [toastMsg]);
 
-            // [Speed Fix] 백그라운드 지오코딩 처리
-            // needsGeocoding 플래그가 있는 항목을 찾아 순차적으로 좌표 변환
-            useEffect(() => {
-                const processGeocoding = async () => {
-                    const pending = deliveries.filter(d => d.needsGeocoding);
-                    if (pending.length === 0) return;
+            
 
-                    // 한 번에 하나씩 처리 (API 제한 고려)
-                    const target = pending[0];
-                    // console.log(`[Background Geocoding] Processing: ${target.address}`);
-                    
-                    try {
-                        const coords = await geocodeAddress(target.address);
-                        if (coords) {
-                            // 성공 시 업데이트
-                            setDeliveries(prev => prev.map(d => 
-                                d.id === target.id ? { ...d, ...coords, needsGeocoding: false } : d
-                            ));
-                            // *주의: 여기서 저장하면 너무 잦은 쓰기가 발생할 수 있음.
-                            // 하지만 React state 업데이트가 비동기이므로, 
-                            // 실제로는 렌더링 사이클에 따라 배치 처리될 가능성이 높음.
-                            // 안전을 위해 변경된 전체 리스트를 저장하는 로직은 setDeliveries 내부 로직이나 별도 effect로 위임하는 것이 좋으나,
-                            // 여기서는 단순화를 위해 직접 저장하지 않고 setDeliveries만 호출 (App 컴포넌트 구조상 state 변경 시 자동 저장이 없다면 추가 필요)
-                        } else {
-                            // 실패 시에도 플래그 제거하여 무한 루프 방지 (또는 재시도 로직 추가 가능)
-                            setDeliveries(prev => prev.map(d => 
-                                d.id === target.id ? { ...d, needsGeocoding: false } : d
-                            ));
-                        }
-                    } catch (e) {
-                        console.error("Geocoding failed", e);
-                        // 에러 발생 시 해당 항목 건너뛰기
-                        setDeliveries(prev => prev.map(d => 
-                            d.id === target.id ? { ...d, needsGeocoding: false } : d
-                        ));
-                    }
-                };
-
-                // 1초 딜레이 후 실행 (UI 렌더링 우선)
-                const timer = setTimeout(processGeocoding, 1000);
-                return () => clearTimeout(timer);
-            }, [deliveries]);
-
-            // [긴급] 지도 표시 시 좌표 미확정(active) 건 즉시 지오코딩
-            useEffect(() => {
-                if (!showMap) return;
-                const targets = groupedDeliveries
-                    .filter(g => {
-                        if (!g.is_active) return false;
-                        const invalid = (g.lat == null || g.lng == null || isNaN(Number(g.lat)) || isNaN(Number(g.lng)));
-                        if (invalid) return true;
-                        // 지역 근접성 검사: 인천/미추홀구가 포함되어 있는데 인천 중심에서 너무 멀면 재지오코딩
-                        const addr = g.address || '';
-                        const nearIncheon = addr.includes('인천') || addr.includes('미추홀구');
-                        const roadHint = addr.includes('독정이로');
-                        if (nearIncheon) {
-                            const dist = getDistance(37.4563, 126.7052, Number(g.lat), Number(g.lng));
-                            return dist > 60;
-                        }
-                        if (roadHint) {
-                            const dist = getDistance(37.4563, 126.7052, Number(g.lat), Number(g.lng));
-                            return dist > 60;
-                        }
-                        return false;
-                    })
-                    .slice(0, 20);
-                if (targets.length === 0) return;
-                
-                let cancelled = false;
-                (async () => {
-                    for (const g of targets) {
-                        try {
-                            const coords = await geocodeAddress(g.address, true);
-                            if (cancelled) continue;
-                            let fix = coords;
-                            if (!fix) {
-                                const addr = g.address || '';
-                                const nearIncheon = addr.includes('인천') || addr.includes('미추홀구') || addr.includes('독정이로');
-                                if (nearIncheon) fix = { lat: 37.4563, lng: 126.7052 };
-                            }
-                            if (!fix) continue;
-                            setDeliveries(prev => prev.map(d => 
-                                g.ids.includes(d.id) ? { ...d, lat: fix.lat, lng: fix.lng, needsGeocoding: false } : d
-                            ));
-                        } catch (e) {
-                            // ignore
-                        }
-                    }
-                })();
-                return () => { cancelled = true; };
-            }, [showMap, groupedDeliveries]);
+            
             // [Auto Save] deliveries 변경 시 로컬 스토리지 저장 및 서버 동기화
             useEffect(() => {
                 if (isRemoteUpdate.current) {
@@ -3076,6 +3097,40 @@
                 }
             }, [groupedDeliveries, deliveries]);
 
+            useEffect(() => {
+                const toGeocode = deliveries.filter(d => {
+                    const invalid = !d.lat || isNaN(d.lat) || !d.lng || isNaN(d.lng);
+                    const attempted = d.geocode_attempted === true;
+                    const dateMatch = showAllDates || targetDate === 'all' || d.date === targetDate;
+                    return invalid && !attempted && dateMatch;
+                });
+                if (toGeocode.length === 0) return;
+                (async () => {
+                    const updates = [];
+                    for (const d of toGeocode.slice(0, 10)) {
+                        const addr = formatAddressDisplay(d.address || '');
+                        let coords = await geocodeAddress(addr, true);
+                        if (!coords) coords = await geocodeAddress(addr, false);
+                        if (coords) {
+                            updates.push({ id: d.id, lat: coords.lat, lng: coords.lng, geocode_attempted: true });
+                        } else {
+                            updates.push({ id: d.id, geocode_attempted: true });
+                        }
+                        await new Promise(r => setTimeout(r, 300));
+                    }
+                    if (updates.length > 0) {
+                        setDeliveries(prev => {
+                            const next = prev.map(x => {
+                                const u = updates.find(y => y.id === x.id);
+                                return u ? { ...x, ...u } : x;
+                            });
+                            StorageManager.saveDeliveries(next);
+                            return next;
+                        });
+                    }
+                })();
+            }, [deliveries, targetDate, showAllDates]);
+
             // [Effect] SortableJS 초기화 (드래그 앤 드롭)
             useEffect(() => {
                 if (view !== 'driver') return;
@@ -3174,12 +3229,7 @@
             
             // 자동 삭제 로직 제거: 사용자가 데이터 재업로드를 원함
             
-            useEffect(() => {
-                // 지도 노드가 주소와 멀리 떨어져 있거나 좌표가 없을 경우 자동 보정
-                if ((deliveries || []).length > 0) {
-                    reconcileAllCoordinates(deliveries, setDeliveries);
-                }
-            }, [deliveries]);
+            
             
             // [기능] 비용 업데이트 (기사 입력)
             const updateGroupFees = (ids, field, value) => {
@@ -3224,45 +3274,9 @@
                 });
                 setDeliveries(updated);
                 StorageManager.saveDeliveries(updated);
- 
-                // 2) 지오코딩 후 좌표 갱신 (성공 시)
-                try {
-                    const coords = await geocodeAddress(formatAddressDisplay(newAddress), true);
-                    if (coords) {
-                        const updated2 = updated.map(d => {
-                            if (ids.includes(d.id)) {
-                                return { ...d, lat: coords.lat, lng: coords.lng };
-                            }
-                            return d;
-                        });
-                        setDeliveries(updated2);
-                        StorageManager.saveDeliveries(updated2);
-                    }
-                } catch (e) {
-                    console.warn("주소 좌표 갱신 실패", e);
-                }
             }
 
-            const geocodeTimersRef = useRef({});
-            function scheduleGroupGeocode(ids, addr) {
-                const key = Array.isArray(ids) ? ids.join('_') : String(ids);
-                const timers = geocodeTimersRef.current;
-                if (timers[key]) clearTimeout(timers[key]);
-                timers[key] = setTimeout(async () => {
-                    try {
-                        const coords = await geocodeAddress(formatAddressDisplay(addr), true);
-                        if (!coords) return;
-                        const updated = deliveries.map(d => {
-                            if (ids.includes(d.id)) {
-                                return { ...d, lat: coords.lat, lng: coords.lng };
-                            }
-                            return d;
-                        });
-                        setDeliveries(updated);
-                        StorageManager.saveDeliveries(updated);
-                    } catch {}
-                }, 600);
-            }
+            
 
             // [기능] 네비게이션 및 토스트 메시지
             const showToast = (msg) => {
@@ -3319,6 +3333,8 @@
                         handleSequenceChange(ids, newSeq);
                     }
                 };
+                window.handleSetStartPoint = handleSetStartPoint;
+                window.handleUpdateEndPoint = handleUpdateEndPoint;
             }, [handleSequenceChange]);
 
             // [기능] 메모 업데이트
@@ -3577,6 +3593,24 @@
                     reservationDate: '', reservationTime: '', isInstallNeeded: false, installTime: '', memo: ''
                 }));
                 setLoading(false);
+            }
+
+            async function addDelivery(delivery) {
+                let { lat, lng } = delivery;
+                if (!lat || !lng) {
+                    const addr = formatAddressDisplay(delivery.address || '');
+                    const coords = await geocodeAddress(addr);
+                    if (!coords) {
+                        alert('주소를 지도에서 찾지 못했습니다.\n주소를 다시 확인해주세요.');
+                        return;
+                    }
+                    lat = coords.lat;
+                    lng = coords.lng;
+                }
+                const newDelivery = { ...delivery, lat, lng };
+                const next = [...deliveries, newDelivery];
+                setDeliveries(next);
+                StorageManager.saveDeliveries(next);
             }
 
             // [기능] 상태 초기화 (체크 해제)
@@ -3912,6 +3946,9 @@
                         }
                     });
 
+                    // [속도 개선] 대량 파싱 직후 한 틱 양보 (UI 반응성 확보)
+                    await new Promise(r => setTimeout(r, 0));
+
                     // [검증 로직] 1차 자동 대조 및 로그 생성
                     const validationLogs = [];
                     const phoneGroups = {}; // 전화번호 기준 그룹화 (검증용)
@@ -3938,6 +3975,9 @@
                     // 2차 가공: 주소+기사 기준 병합
                     // (주소가 같아도 기사가 다르면 별도 정산 건으로 처리해야 함)
                     const mergedMap = new Map();
+
+                    // [속도 개선] 이벤트 루프에 양보하여 UI 먼저 그리기
+                    await new Promise(r => setTimeout(r, 0));
 
                     rawRows.forEach(row => {
                         // [수정] 주소 + 기사 정보로 그룹화
@@ -3996,35 +4036,34 @@
 
                     // 3차: 지오코딩 및 객체 생성
                     const results = [];
-
+            
                     for (const [key, group] of mergedMap) {
-                        // [Speed Fix] 초기 로딩 시 지오코딩 건너뛰기 (즉시 로딩)
-                        // 백그라운드에서 처리하도록 플래그(needsGeocoding) 설정 및 기본 좌표 할당
-                        const coords = { lat: 37.5665, lng: 126.9780, needsGeocoding: true };
-
-                        // 대표 상품명 생성
+                        const coreAddr = formatAddressDisplay(group.address);
+                        let coords = await geocodeAddress(coreAddr, true);
+                        if (!coords) coords = await geocodeAddress(coreAddr, false);
+            
                         let displayItem = group.items[0].item;
                         if (group.items.length > 1) {
                             displayItem = `${displayItem} 외 ${group.items.length - 1}건`;
                         }
-
+            
                         results.push({
                             id: crypto.randomUUID(),
                             date: parseCustomDate(group.rawDate),
-                            order_number: group.order_number, // [New] 주문번호
-                            invoice_number: group.invoice_number, // [New] 송장번호
+                            order_number: group.order_number,
+                            invoice_number: group.invoice_number,
                             item: displayItem,
-                            detail_items: group.items, // 상세 내역 저장
+                            detail_items: group.items,
                             phone: group.phone,
                             address: group.address,
-                            driver: group.driver, // [New] 기사 정보 매핑
-                            center: group.center, // [New] 센터
-                            region: group.region, // [New] 지역
+                            driver: group.driver,
+                            center: group.center,
+                            region: group.region,
                             install_fee: group.totalInstallFee,
                             yangjung: group.totalYangjung,
                             naerim: group.totalNaerim,
                             etc_fee: group.totalEtc,
-                            ...(coords || { lat: 37.5665, lng: 126.9780, needsGeocoding: true }) // [안전장치] 기본값 + 플래그
+                            ...(coords ? { lat: coords.lat, lng: coords.lng } : {})
                         });
                     }
 
@@ -4065,28 +4104,8 @@
 
                     const updated = Array.from(existingMap.values());
                     setDeliveries(updated);
-                    const isLocalSaved = await StorageManager.saveDeliveries(updated);
-                    
-                    // [Sync Check] 서버 동기화 상태 확인 및 알림
-                    let syncMsg = "";
-                    if (isLocalSaved) {
-                         syncMsg += "\n✅ PC 서버 저장 완료 (자동)";
-                    } else {
-                         syncMsg += "\n⚠️ PC 서버 저장 실패 (새로고침 후 다시 시도하세요)";
-                    }
-                    
-                    if (CloudManager.isConnected && CloudManager.client) {
-                        try {
-                            // 명시적 동기화 시도 (사용자 피드백용)
-                            await CloudManager.push(updated);
-                            syncMsg += "\n☁️ 클라우드 백업 완료";
-                        } catch (e) {
-                            console.error(e);
-                            syncMsg += "\n⚠️ 클라우드 백업 실패";
-                        }
-                    } else {
-                        // syncMsg += "\n(클라우드 미연결)"; // 너무 긴 메시지 생략
-                    }
+                    // [속도 개선] 저장은 백그라운드로 처리 (UI 즉시 갱신 우선)
+                    StorageManager.saveDeliveries(updated);
 
                     if (results.length > 0) {
                         const uniqueDates = [...new Set(results.map(r => r.date))];
@@ -4109,7 +4128,7 @@
                              dateMsg = `\n📅 ${uniqueDates.length}일치 데이터가 통합되었습니다.\n(전체 날짜 보기 모드로 전환됨)`;
                         }
 
-                        alert(`엑셀 업로드 완료! (신규 ${newCount}건, 업데이트 ${updateCount}건)${syncMsg}${dateMsg}`);
+                        alert(`엑셀 업로드 완료! (신규 ${newCount}건, 업데이트 ${updateCount}건)${dateMsg}`);
                     } else {
                         alert("업로드된 데이터가 없습니다.");
                     }
@@ -5307,6 +5326,13 @@ ${logContent}
                                                     }} className="col-span-2 bg-orange-50 text-orange-800 py-3 rounded-lg font-bold hover:bg-orange-100 transition text-sm border border-orange-200 shadow-sm flex items-center justify-center gap-2">
                                                         <span>↺</span> 자동 백업 복구
                                                     </button>
+                                                    <button onClick={() => {
+                                                        if (!confirm('모든 데이터가 삭제됩니다. 진행하시겠습니까?')) return;
+                                                        localStorage.removeItem(Config.STORAGE_KEYS.DELIVERIES);
+                                                        location.reload();
+                                                    }} className="col-span-2 bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 transition text-sm shadow-md flex items-center justify-center gap-2">
+                                                        🗑 전체 데이터 초기화
+                                                    </button>
                                                 </div>
                                             </div>
                                         </details>
@@ -5617,7 +5643,7 @@ ${logContent}
                                             ]} 
                                                 center={
                                                     groupedDeliveries.find(d => d.is_active && d.lat && d.lng && !isNaN(d.lat) && !isNaN(d.lng)) 
-                                                    || (startPoint && startPoint.lat && startPoint.lng ? startPoint : { lat: 37.5665, lng: 126.9780 })
+                                                    || (startPoint && startPoint.lat && startPoint.lng ? startPoint : null)
                                                 } 
                                             startPoint={startPoint}
                                         />
@@ -5844,7 +5870,6 @@ ${logContent}
                                                                     value={group.address || ''} 
                                                                     onChange={(e) => { 
                                                                         updateGroupContact(group.ids, { address: e.target.value });
-                                                                        scheduleGroupGeocode(group.ids, e.target.value);
                                                                     }}
                                                                     onBlur={(e) => updateGroupAddress(group.ids, e.target.value)}
                                                                     placeholder="주소 입력"
