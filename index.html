@@ -632,54 +632,132 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
-        // 주소를 좌표로 변환하는 함수 (정밀도 개선 버전) 
-        async function geocodeAddress(address) { 
-            if (!address) return null; 
-
-            // 1. 상세주소 제거 로직 (동/호수, 괄호 내용 등 제거) 
-            // 예: "서울시 강남구 테헤란로 123, 101동 202호" -> "서울시 강남구 테헤란로 123" 
-            const cleanAddress = address 
-                .split(',')[0]           // 쉼표 뒤 제거 
-                .split('(')[0]           // 괄호 앞까지만 사용 
-                .replace(/\s\d+동.*$/, '') // '101동...' 형태 이후 제거 
-                .trim(); 
+        // 주소를 좌표로 변환하는 함수 (정밀도 개선 버전 - OpenStreetMap API) 
+        async function geocodeAddress(address, strict = false) { 
+            // [안전장치] 주소 유효성 검사 
+            if (!address || typeof address !== 'string') { 
+                return strict ? null : { lat: 37.5665, lng: 126.9780 }; 
+            } 
 
             try { 
-                // Nominatim API 사용 (한국 지역 우선 검색을 위해 viewbox/bounded 추가 가능) 
-                const response = await fetch( 
-                    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cleanAddress)}&limit=1`
-                ); 
-                const data = await response.json(); 
-
-                if (data && data.length > 0) { 
-                    // 중요: 위도(lat)와 경도(lon) 순서 확인 
-                    return { 
-                        lat: parseFloat(data[0].lat), 
-                        lng: parseFloat(data[0].lon) 
-                    }; 
-                } 
+                // [개선된 지오코딩 로직] 
+                // 1. 기본 정제: 괄호 제거, 앞뒤 공백 제거, 동/호수, 층수 등 불필요한 정보 제거
+                let cleanAddr = address
+                    .split(',')[0] // 콤마 이후 상세주소 제거
+                    .split('(')[0] // 괄호 이후 제거
+                    .replace(/\s+[A-Za-z0-9가-힣]+(아파트|빌라|오피스텔|타워|센터|빌딩)/g, '') // 건물 이름 제거 시도
+                    .replace(/\s+\d+(동|호|층)/g, '') // 동/호/층 완벽 제거
+                    .replace(/지하\d+층/g, '') // 지하층 제거
+                    .replace(/B\d+/g, '') // B1 등 제거
+                    .trim(); 
                  
-                // 2. 실패 시 단어 하나를 줄여서 재시도 (예: '강남구 테헤란로 123'만 검색) 
-                const parts = cleanAddress.split(' '); 
-                if (parts.length > 2) { 
-                    const retryAddress = parts.slice(0, -1).join(' '); 
-                    const retryResponse = await fetch( 
-                        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(retryAddress)}&limit=1`
-                    ); 
-                    const retryData = await retryResponse.json(); 
-                    if (retryData && retryData.length > 0) { 
-                        return { 
-                            lat: parseFloat(retryData[0].lat), 
-                            lng: parseFloat(retryData[0].lon) 
-                        }; 
+                // 도우미 함수: Nominatim 검색 (딜레이 추가로 API 차단 방지)
+                const search = async (query) => { 
+                    try { 
+                        // 짧은 지연을 주어 API 과부하/차단 방지
+                        await new Promise(r => setTimeout(r, 100)); 
+                        // 한국 내에서만 검색되도록 강제 (대한민국 키워드 추가)
+                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=kr&limit=1`, {
+                            headers: {
+                                'Accept-Language': 'ko-KR,ko;q=0.9'
+                            }
+                        }); 
+                        const data = await res.json(); 
+                        if (data && data.length > 0) { 
+                            const lat = parseFloat(data[0].lat); 
+                            const lng = parseFloat(data[0].lon); 
+                            if (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) return null; 
+                            return { lat, lng }; 
+                        } 
+                    } catch(e) { return null; } 
+                    return null; 
+                }; 
+
+                // 전략 1: 도로명 주소 파싱 (시/군/구 + 도로명 + 건물번호) - 무료 API는 이 방식이 가장 정확함
+                const tokens = cleanAddr.split(/\s+/); 
+                 
+                let siDo = ""; 
+                let guGun = ""; 
+                let roadName = ""; 
+                let buildingNum = ""; 
+
+                // 역순으로 탐색하여 건물번호, 도로명 식별 
+                for (let i = tokens.length - 1; i >= 0; i--) { 
+                    const t = tokens[i]; 
+                    if (!buildingNum && /^\d+(-\d+)?$/.test(t)) { 
+                        buildingNum = t; 
+                        continue; 
+                    } 
+                    if (!roadName && (t.endsWith('로') || t.endsWith('길') || t.match(/[로길]\d+번길/))) { 
+                        roadName = t; 
+                        continue; 
+                    } 
+                    if (!guGun && (t.endsWith('구') || t.endsWith('군') || (t.endsWith('시') && t.length > 2))) { 
+                        guGun = t; 
+                        continue; 
+                    } 
+                    if (!siDo && (t.endsWith('시') || t.endsWith('도'))) { 
+                        siDo = t; 
                     } 
                 } 
-                 
-                return null; 
-            } catch (error) { 
-                console.error("Geocoding error:", error); 
-                return null; 
-            } 
+
+                let result = null;
+
+                // 1순위: 파싱된 도로명 주소로 정밀 검색
+                if (roadName && buildingNum) { 
+                    if (siDo && guGun) { 
+                        result = await search(`${siDo} ${guGun} ${roadName} ${buildingNum}`); 
+                        if (result) return result; 
+                    } 
+                    if (guGun) { 
+                        result = await search(`${guGun} ${roadName} ${buildingNum}`); 
+                        if (result) return result; 
+                    } 
+                    result = await search(`${roadName} ${buildingNum}`); 
+                    if (result) return result; 
+                } 
+
+                // 2순위: 전체 주소 검색 (정제된 상태)
+                result = await search(cleanAddr); 
+                if (result) return result; 
+
+                // 3순위: 상세주소(마지막 어절) 계속 제거하면서 검색 (Fallback)
+                let fallbackTokens = [...tokens];
+                while (fallbackTokens.length > 2) {
+                    fallbackTokens.pop();
+                    result = await search(fallbackTokens.join(' '));
+                    if (result) return result;
+                }
+
+                // 4순위: 동/읍/면 단위까지만 검색 시도
+                const dongToken = tokens.find(t => t.endsWith('동') || t.endsWith('읍') || t.endsWith('면'));
+                if (dongToken) {
+                    if (siDo && guGun) {
+                        result = await search(`${siDo} ${guGun} ${dongToken}`);
+                        if (result) return result;
+                    }
+                    if (guGun) {
+                        result = await search(`${guGun} ${dongToken}`);
+                        if (result) return result;
+                    }
+                }
+
+            } catch (e) { console.error("Geocoding failed", e); } 
+             
+            // Strict 모드일 경우 Fallback 사용 안 함 
+            if (strict) return null; 
+
+            // [Fallback] 모든 검색 실패 시 지역별 중심 좌표 반환
+            return getRegionalFallback(address);
+        }
+        
+        // 검색 완전 실패 시 지역별 시청/도청 좌표 반환 (바다 방지용)
+        function getRegionalFallback(address) {
+            if (address.includes('인천')) return { lat: 37.4563, lng: 126.7052 }; 
+            if (address.includes('경기') || address.includes('김포')) return { lat: 37.6152, lng: 126.7156 }; 
+            if (address.includes('부산')) return { lat: 35.1796, lng: 129.0756 }; 
+            if (address.includes('대구')) return { lat: 35.8714, lng: 128.6014 }; 
+            return { lat: 37.5665, lng: 126.9780 }; // Default: 서울시청
         }
         
         function formatAddressDisplay(address) {
@@ -793,134 +871,160 @@
             return path;
         }
 
-        // [컴포넌트] 지도 (데이터 오류 및 렌더링 안정화 버전) 
-         function MapView({ locations, center, startPoint }) { 
-             const mapRef = useRef(null); 
-             const mapInstance = useRef(null); 
-             const markersRef = useRef([]); 
-  
-             // 1. 데이터 변경을 감지하기 위한 의존성 문자열 
-             const locationsStr = JSON.stringify(locations || []); 
-             const startStr = JSON.stringify(startPoint || null); 
-  
-             useEffect(() => { 
-                 if (!mapRef.current) return; 
-  
-                 // 2. 지도 초기화 (최초 1회만 실행) 
-                 if (!mapInstance.current) { 
-                     mapInstance.current = L.map(mapRef.current, { 
-                         zoomControl: false, 
-                         attributionControl: false 
-                     }).setView([37.5665, 126.9780], 13); 
-                      
-                     // z-index 강제 조정을 위한 pane 설정 추가 (마커가 뒤로 숨는 현상 방지)
-                     mapInstance.current.createPane('markerPaneCustom');
-                     mapInstance.current.getPane('markerPaneCustom').style.zIndex = 650;
+        // [컴포넌트] 지도 (사용자 코드 기반 + 디자인 및 줌 버그 픽스 병합)
+        function MapView({ locations, center, startPoint }) { 
+            const mapRef = useRef(null); 
+            const mapInstance = useRef(null); 
+            const polylineRef = useRef(null); 
+ 
+            // 데이터 변경을 감지하기 위한 의존성 문자열 (무한 렌더링 방지용)
+            const locationsStr = JSON.stringify(locations || []); 
+            const startStr = JSON.stringify(startPoint || null); 
+            const centerStr = JSON.stringify(center || null);
 
-                     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapInstance.current); 
-                 } 
-  
-                 const map = mapInstance.current; 
-  
-                 // 3. 기존의 모든 마커와 선을 깨끗하게 제거 
-                 markersRef.current.forEach(layer => map.removeLayer(layer)); 
-                 markersRef.current = []; 
-                 map.eachLayer(layer => { 
-                     if (layer instanceof L.Marker || layer instanceof L.Polyline) { 
-                         map.removeLayer(layer); 
-                     } 
-                 }); 
-  
-                 const bounds = []; 
-                 const routeLatLngs = []; 
-  
-                 // 4. 출발지(물류센터) 마커 생성 
-                 if (startPoint && startPoint.lat && startPoint.lng) { 
-                     const pos = [Number(startPoint.lat), Number(startPoint.lng)]; 
-                     if (!isNaN(pos[0]) && !isNaN(pos[1])) { 
-                         const startMarker = L.marker(pos, { 
-                             icon: L.divIcon({ 
-                                 className: 'custom-marker', 
-                                 html: `<div style="background-color:#2563eb; width:18px; height:18px; border-radius:50%; border:3px solid white; box-shadow:0 0 5px rgba(0,0,0,0.4);"></div>`, 
-                                 iconSize: [18, 18] 
-                             }),
-                             pane: 'markerPaneCustom' // Pane 적용
-                         }).addTo(map).bindPopup("🚩 출발지 (물류센터)"); 
-                         markersRef.current.push(startMarker); 
-                         bounds.push(pos); 
-                         routeLatLngs.push(pos); 
-                     } 
-                 } 
-  
-                 // 5. 배송지 마커 생성 루프 
-                 const parsedLocations = JSON.parse(locationsStr); 
-                 console.log("[MapView] parsedLocations to render:", parsedLocations);
-                 parsedLocations.forEach((group, idx) => { 
-                     const lat = Number(group.lat); 
-                     const lng = Number(group.lng); 
-                      
-                     if (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) {
-                         console.warn("[MapView] Skipping marker due to invalid coordinates:", group);
-                         return; // 좌표가 숫자가 아니면 건너뜀 
-                     }
-  
-                     const pos = [lat, lng]; 
-                     bounds.push(pos); 
-                     routeLatLngs.push(pos); 
-  
-                     const isDest = group.type === 'destination'; 
-                     const iconHtml = isDest  
-                         ? `<div style='background-color:#10b981; color:white; border-radius:50%; width:28px; height:28px; text-align:center; line-height:28px; font-size:16px; border:2px solid white; box-shadow:0 2px 5px rgba(0,0,0,0.3);'>🏠</div>` 
-                         : `<div style='background-color:#ef4444; color:white; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-weight:bold; font-size:12px; border:2px solid white; box-shadow:0 2px 5px rgba(0,0,0,0.3);'>${idx + 1}</div>`; 
-  
-                     const marker = L.marker(pos, { 
-                         icon: L.divIcon({ 
-                             className: 'custom-div-icon', 
-                             html: iconHtml, 
-                             iconSize: isDest ? [28, 28] : [24, 24], 
-                             iconAnchor: isDest ? [14, 14] : [12, 12] 
-                         }),
-                         pane: 'markerPaneCustom' // Pane 적용
-                     }).addTo(map); 
-  
-                     const popupContent = ` 
-                         <div style="padding: 5px; min-width:140px;"> 
-                             <p style="margin:0; font-weight:bold; font-size:13px;">${isDest ? '🏠 최종 도착지' : (idx + 1) + '번 배송지'}</p> 
-                             <p style="margin:4px 0 0 0; font-size:11px; color:#666;">${group.address || '주소 정보 없음'}</p> 
-                         </div> 
-                     `; 
-                     marker.bindPopup(popupContent); 
-                     markersRef.current.push(marker); 
-                 }); 
-  
-                 // 6. 경로 연결 선(Polyline) 
-                 if (routeLatLngs.length >= 2) { 
-                     const line = L.polyline(routeLatLngs, { 
-                         color: '#3b82f6', 
-                         weight: 3, 
-                         opacity: 0.5, 
-                         dashArray: '5, 8' 
-                     }).addTo(map); 
-                     markersRef.current.push(line); 
-                 } 
-  
-                 // 7. 모든 마커가 화면에 들어오도록 자동 줌 조절 
-                 if (bounds.length > 0) { 
-                     map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 }); 
-                 } else if (center) { 
-                     map.setView([Number(center.lat), Number(center.lng)], 13); 
-                 } 
-  
-             }, [locationsStr, startStr]); 
-  
-             return ( 
-                 <div  
-                     ref={mapRef}  
-                     className="map-container mb-4 shadow-inner bg-gray-100 rounded-xl" 
-                     style={{ height: '350px', width: '100%', zIndex: 1, position: 'relative' }} 
-                 ></div> 
-             ); 
-         }
+            useEffect(() => { 
+                if (!mapRef.current) return; 
+                 
+                // [디버그] 마커 상태 로그 (사용자 제공 코드 반영)
+                console.log(`[Map] 렌더링: 활성 마커 ${locations.length}개, 중심: ${center?.address || 'N/A'}`); 
+ 
+                // 초기화 
+                if (!mapInstance.current) { 
+                    mapInstance.current = L.map(mapRef.current, { 
+                        zoomControl: false, // 줌 컨트롤(+/-) 제거 (사용자 코드 반영)
+                        preferCanvas: false // [Fix] 확대/축소 시 DOM 마커 사라짐 버그 방지
+                    }).setView([center?.lat || 37.5665, center?.lng || 126.9780], 12); 
+                    
+                    // [Fix] Leaflet 내장 기본 pane 중 markerPane의 z-index를 직접 조정하여 마커 숨김 방지
+                    mapInstance.current.getPane('markerPane').style.zIndex = 650;
+                    mapInstance.current.getPane('popupPane').style.zIndex = 700;
+
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' }).addTo(mapInstance.current); 
+                } else { 
+                    // [Fix] 1번 배송지가 있다면 1번 배송지를 중심으로 줌인 이동
+                    const firstDelivery = locations.find(g => (g.sequence_number === 1 || g.sequence_number === '1' || locations.indexOf(g) === 0) && g.type !== 'start' && g.type !== 'destination');
+                    
+                    if (firstDelivery && !isNaN(Number(firstDelivery.lat)) && !isNaN(Number(firstDelivery.lng))) {
+                        mapInstance.current.setView([Number(firstDelivery.lat), Number(firstDelivery.lng)], 16);
+                    } else if (center && center.lat && center.lng) {
+                        mapInstance.current.setView([center.lat, center.lng], 12); 
+                    }
+                } 
+ 
+                // 마커 클리어 (사용자 제공 코드 방식)
+                mapInstance.current.eachLayer(layer => { 
+                    if (layer instanceof L.Marker || layer instanceof L.Polyline) mapInstance.current.removeLayer(layer); 
+                }); 
+ 
+                // 1. 출발지 마커 (물방울 디자인 병합)
+                if (startPoint && !isNaN(startPoint.lat) && !isNaN(startPoint.lng)) { 
+                    const startIcon = L.divIcon({ 
+                        className: 'custom-div-icon', 
+                        html: `<div class="marker-pin" style="background: #2563eb;"></div><div class="marker-text" style="color: #2563eb;">🚩</div>`, 
+                        iconSize: [36, 36],
+                        iconAnchor: [18, 36]
+                    }); 
+                    const startMarker = L.marker([startPoint.lat, startPoint.lng], { icon: startIcon }).addTo(mapInstance.current).bindPopup("🚩 출발지 (물류센터)"); 
+                    startMarker.off('click'); 
+                    startMarker.on('click', function() { 
+                        if (this.isPopupOpen()) this.closePopup(); 
+                        else this.openPopup(); 
+                    }); 
+                } 
+ 
+                // 2. 배송지 및 도착지 마커 (사용자 루프 + 디자인 병합)
+                locations.forEach((group, idx) => { 
+                    // [안전장치] 좌표 유효성 검사 
+                    if (!group.lat || !group.lng || isNaN(group.lat) || isNaN(group.lng)) return; 
+ 
+                    // [도착지(집) 마커] 
+                    if (group.type === 'destination') { 
+                        const icon = L.divIcon({ 
+                            className: 'custom-div-icon', 
+                            html: `<div class="marker-pin" style="background: #10b981;"></div><div class="marker-text" style="color: #10b981; font-size: 16px;">🏠</div>`, 
+                            iconSize: [36, 36], 
+                            iconAnchor: [18, 36] 
+                        }); 
+                        const destMarker = L.marker([group.lat, group.lng], { icon }).addTo(mapInstance.current) 
+                         .bindPopup(`<div class="font-bold text-center p-2">🏠 도착지(집)<br/><span class="text-xs text-gray-500">${group.address}</span></div>`); 
+                        destMarker.off('click'); 
+                        destMarker.on('click', function() { 
+                            if (this.isPopupOpen()) this.closePopup(); 
+                            else this.openPopup(); 
+                        }); 
+                        return; 
+                    } 
+ 
+                    // [일반 배송지 마커] 
+                    const seqNum = group.sequence_number || (idx + 1);
+                    const icon = L.divIcon({ 
+                        className: 'custom-div-icon', 
+                        html: `<div class="marker-pin" style="background: #ef4444;"></div><div class="marker-text" style="color: #ef4444; top: 7px; left: -1px;">${seqNum}</div>`, 
+                        iconSize: [36, 36], 
+                        iconAnchor: [18, 36] 
+                    }); 
+                     
+                    const popupContent = ` 
+                        <div class="p-4 min-w-[280px] bg-white rounded-2xl"> 
+                            <div class="flex items-center gap-3 mb-3"> 
+                                <span class="bg-[#d9534f] text-white text-sm font-bold px-3 py-1 rounded-full shadow-sm">${seqNum}번</span> 
+                                <span class="font-bold text-lg text-gray-800">${group.phone || ''}</span> 
+                            </div> 
+                            <div class="flex items-start gap-2 mb-4">
+                                <span class="text-[#d9534f] text-lg mt-0.5">📍</span>
+                                <span class="text-[15px] font-medium text-gray-800 leading-snug">${group.address || '주소 정보 없음'}</span> 
+                            </div> 
+                            <div class="border-t border-gray-100 pt-4"> 
+                                <ul class="list-disc pl-4 text-sm space-y-0.5 text-gray-700 mb-3"> 
+                                    ${(group.items || []).map(i => `<li>${i.item}</li>`).join('')} 
+                                </ul>
+                                <div class="flex gap-2"> 
+                                    <button onclick="window.handleAppNavigation(${group.lat}, ${group.lng}, '${(group.address || '').replace(/'/g, "\\'")}')" class="flex-1 bg-[#d9534f] hover:bg-[#c9302c] text-white font-bold py-2.5 rounded-xl flex items-center justify-center transition shadow-md text-sm"> 
+                                        배송출발 
+                                    </button> 
+                                    <button onclick="window.handlePopupSequenceChange('${(group.ids || []).join(',')}')" class="flex-1 bg-[#5bc0de] hover:bg-[#31b0d5] text-white font-bold py-2.5 rounded-xl flex items-center justify-center transition shadow-md text-sm"> 
+                                        순서변경 
+                                    </button> 
+                                    <button onclick="document.querySelector('.leaflet-popup-close-button').click()" class="flex-1 bg-[#e2e8f0] hover:bg-[#cbd5e1] text-[#475569] font-bold py-2.5 rounded-xl flex items-center justify-center transition shadow-md text-sm"> 
+                                        닫기 
+                                    </button> 
+                                </div> 
+                            </div> 
+                        </div> 
+                    `; 
+                    const marker = L.marker([group.lat, group.lng], { icon }).addTo(mapInstance.current).bindPopup(popupContent); 
+                    marker.off('click'); 
+                    marker.on('click', function() { 
+                        if (this.isPopupOpen()) { 
+                            this.closePopup(); 
+                        } else { 
+                            this.openPopup(); 
+                        } 
+                    }); 
+                }); 
+ 
+                // 3. 경로 선 그리기 (사용자 제공 코드 기반)
+                if (startPoint && locations.length > 0) { 
+                    const latlngs = [ 
+                        [startPoint.lat, startPoint.lng], 
+                        ...locations.map(l => [l.lat, l.lng]) 
+                    ].filter(pos => !isNaN(pos[0]) && !isNaN(pos[1])); // 유효한 좌표만 필터링
+                    
+                    if (latlngs.length >= 2) {
+                        L.polyline(latlngs, { color: '#2563eb', weight: 4, opacity: 0.7, dashArray: '10, 10' }).addTo(mapInstance.current); 
+                    }
+                } 
+ 
+            }, [locationsStr, startStr, centerStr]); 
+ 
+            return ( 
+                <div  
+                    ref={mapRef}  
+                    className="map-container mb-4 shadow-inner bg-gray-100 rounded-xl" 
+                    style={{ height: '350px', width: '100%', zIndex: 1, position: 'relative' }} 
+                ></div> 
+            ); 
+        }
 
         // [컴포넌트] 로그인/메인 진입 화면
         function LoginScreen({ onLogin }) {
@@ -946,6 +1050,7 @@
                                 </div>
                                 <input 
                                     type="text" 
+                                    list="driverNames"
                                     placeholder="이름을 입력해주세요" 
                                     className="w-full bg-slate-50 border border-slate-200 p-4 pl-11 rounded-2xl text-lg font-bold text-slate-800 placeholder:text-slate-400 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all"
                                     value={driverName}
@@ -960,6 +1065,9 @@
                                         }
                                     }}
                                 />
+                                <datalist id="driverNames">
+                                    <option value="가나다" />
+                                </datalist>
                             </div>
 
                             <button 
@@ -2037,9 +2145,15 @@
                     if (!notice && savedNotice) setNotice(savedNotice);
 
                     console.log("✅ Initialization Complete");
+                    
+                    // 데이터 로드가 끝났음을 전역적으로 알림
+                    window.__isAppReady = true;
                 };
 
-                initializeData();
+                // 앱이 처음 로드될 때만 초기화 함수 실행
+                if (!window.__isAppReady) {
+                    initializeData();
+                }
             }, []);
 
             // [Cloud] 동기화 핸들러
@@ -2231,6 +2345,33 @@
             
             // [Auto Save] deliveries 변경 시 로컬 스토리지 저장 및 서버 동기화
             useEffect(() => {
+                // [Fix] 초기 렌더링 시 빈 배열로 덮어씌워지는 현상 완벽 방지
+                
+                // 1. 앱 로딩 중이거나 최초 데이터 로드가 끝나지 않았으면 무조건 저장 차단
+                if (loading) {
+                    console.log('[AutoSave] Blocked save during data loading');
+                    return;
+                }
+
+                // 2. 초기 마운트 직후의 비정상적인 빈 배열 저장 방지
+                // React 18 StrictMode 에서는 마운트가 2번 일어남
+                if (!window.__isAppReady) {
+                    console.log('[AutoSave] Blocked save before app is fully ready');
+                    return;
+                }
+
+                // 로컬 스토리지에 데이터가 있는지 확인
+                const rawLocalData = localStorage.getItem(Config.STORAGE_KEYS.DELIVERIES);
+                const hasLocalData = rawLocalData && rawLocalData !== '[]';
+
+                // 3. state(deliveries)는 비어있는데 로컬스토리지에는 데이터가 있다면?
+                // -> 아직 로컬 데이터를 state에 다 옮겨담지 못한 '렌더링 타이밍 차이'일 확률이 높음 (덮어쓰기 방지)
+                if (deliveries.length === 0 && !isRemoteUpdate.current && hasLocalData) {
+                    console.log('[AutoSave] Blocked empty array overwrite (Local data exists)');
+                    return; 
+                }
+                
+                // 서버에서 가져온 데이터를 세팅하는 중이라면, 로컬에만 살짝 업데이트하고 서버 전송은 스킵
                 if (isRemoteUpdate.current) {
                     console.log('[AutoSave] Skipped cloud push due to remote update');
                     localStorage.setItem(Config.STORAGE_KEYS.DELIVERIES, JSON.stringify(deliveries));
@@ -2238,13 +2379,15 @@
                     return;
                 }
 
+                // 4. 정상적인 저장 로직
                 if (deliveries.length > 0) {
+                    // 데이터가 1개 이상 있으면 무조건 저장
                     StorageManager.saveDeliveries(deliveries);
-                } else if (deliveries.length === 0) {
-                    // 데이터가 0건이라도 삭제 등의 이유로 저장해야 할 수 있음
+                } else if (deliveries.length === 0 && !hasLocalData) {
+                    // 완전히 새로운 빈 상태이거나 사용자가 '전체 삭제'를 눌러 로컬도 비워진 상태일 때만 빈 배열 저장
                     StorageManager.saveDeliveries([]);
                 }
-            }, [deliveries]);
+            }, [deliveries, loading]);
 
             // [Auto Geocode] 좌표가 없는 데이터 자동 변환
             useEffect(() => {
@@ -2446,6 +2589,7 @@
                             // 1. 오늘 날짜에 (나의) 데이터가 있으면 유지 (우선순위 1)
                             if (availableDates.includes(today)) {
                                 // Stay on today
+                                setForm(prev => ({ ...prev, date: today }));
                             } else if (availableDates.length > 0) {
                                 // 2. 오늘 데이터가 없으면, 가장 최신 데이터 날짜로 이동 (과거 기록 확인)
                                 // 사용자 요청: 미완료 업무 우선 표시 로직 제거 -> 단순 최신 날짜 이동
@@ -2459,7 +2603,23 @@
                         if (!start) {
                             start = { ...Config.FIXED_START };
                             try {
-                                const coords = await geocodeAddress(Config.FIXED_START.address);
+                                // 출발지 주소도 번지까지만 잘라서 정확도 향상
+                                let cleanAddr = Config.FIXED_START.address;
+                                const tokens = cleanAddr.split(/\s+/);
+                                let targetIndex = -1;
+                                for (let i = 0; i < tokens.length; i++) {
+                                    if (/^\d+(-\d+)?$/.test(tokens[i]) || tokens[i].endsWith('번지')) {
+                                        targetIndex = i;
+                                        break;
+                                    }
+                                }
+                                if (targetIndex !== -1) {
+                                    cleanAddr = tokens.slice(0, targetIndex + 1).join(' ');
+                                } else if (tokens.length > 4) {
+                                    cleanAddr = tokens.slice(0, 4).join(' ');
+                                }
+
+                                const coords = await geocodeAddress(cleanAddr);
                                 if (coords && (coords.lat !== 37.5665 || coords.lng !== 126.9780)) {
                                      start = { ...coords, address: Config.FIXED_START.address };
                                 }
@@ -2480,6 +2640,32 @@
                         if (end && end.type !== 'destination') {
                             end = { ...end, type: 'destination' };
                         }
+
+                        // 도착지 좌표가 없거나 변경된 로직을 적용하기 위해 지오코딩 재시도
+                        if (end && end.address && (!end.lat || !end.lng)) {
+                            try {
+                                let cleanAddr = end.address;
+                                const tokens = cleanAddr.split(/\s+/);
+                                let targetIndex = -1;
+                                for (let i = 0; i < tokens.length; i++) {
+                                    if (/^\d+(-\d+)?$/.test(tokens[i]) || tokens[i].endsWith('번지')) {
+                                        targetIndex = i;
+                                        break;
+                                    }
+                                }
+                                if (targetIndex !== -1) {
+                                    cleanAddr = tokens.slice(0, targetIndex + 1).join(' ');
+                                } else if (tokens.length > 4) {
+                                    cleanAddr = tokens.slice(0, 4).join(' ');
+                                }
+                                const coords = await geocodeAddress(cleanAddr);
+                                if (coords) {
+                                    end = { ...end, ...coords };
+                                    StorageManager.set(endKey, end);
+                                }
+                            } catch(e) { console.warn("End point geocoding fallback"); }
+                        }
+                        
                         setEndPoint(end);
                         
                         // 4. Load Notice
@@ -2543,10 +2729,11 @@
             // [Sync] Form Date -> Target Date (Dashboard Date Filter)
             useEffect(() => {
                 // 관리자 모드에서 엑셀 업로드로 인해 targetDate가 'all'이 된 경우 form.date로 덮어쓰지 않음
-                if (targetDate !== 'all') {
+                // 단, 전체 보기 모드(showAllDates)가 활성화된 경우는 예외
+                if (targetDate !== 'all' && !showAllDates) {
                     setTargetDate(form.date);
                 }
-            }, [form.date]);
+            }, [form.date, showAllDates]);
 
             // [Render] Fatal Error Screen
             if (fatalError) {
@@ -3809,7 +3996,22 @@
             async function handleSetStartPoint() {
                 const addr = prompt("출발지 주소를 입력하세요:", startPoint?.address || "");
                 if (addr) {
-                    const coords = await geocodeAddress(addr);
+                    let cleanAddr = addr;
+                    const tokens = cleanAddr.split(/\s+/);
+                    let targetIndex = -1;
+                    for (let i = 0; i < tokens.length; i++) {
+                        if (/^\d+(-\d+)?$/.test(tokens[i]) || tokens[i].endsWith('번지')) {
+                            targetIndex = i;
+                            break;
+                        }
+                    }
+                    if (targetIndex !== -1) {
+                        cleanAddr = tokens.slice(0, targetIndex + 1).join(' ');
+                    } else if (tokens.length > 4) {
+                        cleanAddr = tokens.slice(0, 4).join(' ');
+                    }
+
+                    const coords = await geocodeAddress(cleanAddr);
                     const newStart = { ...coords, address: addr };
                     setStartPoint(newStart);
                     StorageManager.set('mvp_start_point', newStart);
@@ -5345,6 +5547,7 @@ ${logContent}
                                         )}
                                         <MapView 
                                             locations={[
+                                                ...(startPoint ? [{...startPoint, type: 'start'}] : []),
                                                 ...groupedDeliveries.filter(d => d.is_active && !d.completed).slice(0, 30),
                                                 ...(endPoint ? [endPoint] : [])
                                             ]} 
