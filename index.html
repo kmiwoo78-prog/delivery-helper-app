@@ -41,9 +41,8 @@
     <!-- SortableJS (드래그 앤 드롭) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
     
-    <!-- 지도 (Leaflet) -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- 지도 (Kakao) -->
+    <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=d076380daed8d8b5c9b9e98cb190bbee&libraries=services&autoload=false"></script>
 
     <!-- 폰트 & 스타일 설정 -->
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap" rel="stylesheet">
@@ -288,8 +287,8 @@
             SUPABASE_URL: "https://yzgsyyolhsxvavcmussi.supabase.co",
             SUPABASE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6Z3N5eW9saHN4dmF2Y211c3NpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3NzY1MjgsImV4cCI6MjA4NTM1MjUyOH0.g6DiBPEfnO5SIsC9iBAzgSurNR3pPF403-JiRUfIS88",
             FIXED_START: {
-                address: "경기도 김포시 양촌읍 학운산단5로가길 22",
-                lat: 37.619, lng: 126.634
+                address: "",
+                lat: null, lng: null
             },
             FIXED_END: {
                 address: "김포한강8로 15",
@@ -298,7 +297,9 @@
             // 스토리지 키
             STORAGE_KEYS: {
                 DELIVERIES: 'mvp_deliveries',
-                SETTINGS: 'mvp_settings'
+                SETTINGS: 'mvp_settings',
+                START_LOCATION: 'mvp_start_location',
+                END_LOCATION: 'mvp_end_location'
             },
             // 예약 시스템 설정
             RESERVATION: {
@@ -322,8 +323,25 @@
             PROTECTED_DATES: ['2026-02-12', '2025-02-12']
         };
 
-        // [유틸리티] Safe Storage Manager
-        const StorageManager = {
+        const StorageManager = { 
+            // 단일 객체로 저장하기 위한 래퍼 함수 (출발지/도착지/배송목록 통합)
+            saveAllData: (deliveriesData, startLocation, endLocation) => {
+                try {
+                    const dataToSave = {
+                        deliveries: deliveriesData,
+                        start_location: startLocation,
+                        destination: endLocation,
+                        timestamp: new Date().toISOString()
+                    };
+                    localStorage.setItem('deliveryData', JSON.stringify(dataToSave));
+                    // 하위 호환성을 위해 개별 키로도 저장
+                    if (deliveriesData) localStorage.setItem(Config.STORAGE_KEYS.DELIVERIES, JSON.stringify(deliveriesData));
+                    if (startLocation) localStorage.setItem(Config.STORAGE_KEYS.START_LOCATION, JSON.stringify(startLocation));
+                    if (endLocation) localStorage.setItem(Config.STORAGE_KEYS.END_LOCATION, JSON.stringify(endLocation));
+                } catch(e) {
+                    console.error("[Storage] saveAllData failed:", e);
+                }
+            },
             get: (key, defaultValue = null) => {
                 try {
                     const item = localStorage.getItem(key);
@@ -342,8 +360,24 @@
                     alert("브라우저 저장 공간이 부족합니다. 일부 데이터를 정리해주세요.");
                 }
             },
+            saveDeliveries: (data) => {
+                // 기존 상태값(startPoint, endPoint)을 가져올 방법이 없으므로, localStorage에서 읽어와서 병합
+                const currentData = StorageManager.get('deliveryData') || {};
+                const currentStart = StorageManager.get(Config.STORAGE_KEYS.START_LOCATION) || currentData.start_location;
+                const currentEnd = StorageManager.get(Config.STORAGE_KEYS.END_LOCATION) || currentData.destination;
+                StorageManager.saveAllData(data, currentStart, currentEnd);
+            },
+            loadDeliveries: () => {
+                const unified = StorageManager.get('deliveryData');
+                if (unified && unified.deliveries) return unified.deliveries;
+                return StorageManager.get(Config.STORAGE_KEYS.DELIVERIES, []);
+            },
             remove: (key) => {
-                localStorage.removeItem(key);
+                try {
+                    localStorage.removeItem(key);
+                } catch (e) {
+                    console.error(`[Storage] Failed to remove ${key}`, e);
+                }
             },
             clearAll: () => {
                 localStorage.clear();
@@ -468,7 +502,10 @@
                 try {
                     // [Requirement] Data must always be Supabase
                     // 1. Local Backup (Immediate UI consistency)
-                    localStorage.setItem(Config.STORAGE_KEYS.DELIVERIES, JSON.stringify(data));
+                    const currentData = StorageManager.get('deliveryData') || {};
+                    const currentStart = StorageManager.get(Config.STORAGE_KEYS.START_LOCATION) || currentData.start_location;
+                    const currentEnd = StorageManager.get(Config.STORAGE_KEYS.END_LOCATION) || currentData.destination;
+                    StorageManager.saveAllData(data, currentStart, currentEnd);
                     
                     // 2. Cloud Sync (Critical)
                     // Ensure connection
@@ -623,6 +660,18 @@
 
         const { useState, useEffect, useRef, useMemo } = React;
 
+        // [유틸리티] UUID 생성 (crypto.randomUUID 지원 안되는 환경 대비)
+        function generateUUID() {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                return crypto.randomUUID();
+            }
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
         // [유틸리티]
         function getDistance(lat1, lon1, lat2, lon2) {
             const R = 6371; 
@@ -632,123 +681,74 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
-        // 주소를 좌표로 변환하는 함수 (정밀도 개선 버전 - OpenStreetMap API) 
+        // 주소를 좌표로 변환하는 함수 (카카오맵 API 완벽 연동 버전)
         async function geocodeAddress(address, strict = false) { 
-            // [안전장치] 주소 유효성 검사 
-            if (!address || typeof address !== 'string') { 
-                return strict ? null : { lat: 37.5665, lng: 126.9780 }; 
-            } 
+            return new Promise((resolve) => { 
+                if (!address || typeof address !== 'string') return resolve(strict ? null : { lat: 37.5665, lng: 126.9780 }); 
 
-            try { 
-                // [개선된 지오코딩 로직] 
-                // 1. 기본 정제: 괄호 제거, 앞뒤 공백 제거, 동/호수, 층수 등 불필요한 정보 제거
-                let cleanAddr = address
-                    .split(',')[0] // 콤마 이후 상세주소 제거
-                    .split('(')[0] // 괄호 이후 제거
-                    .replace(/\s+[A-Za-z0-9가-힣]+(아파트|빌라|오피스텔|타워|센터|빌딩)/g, '') // 건물 이름 제거 시도
-                    .replace(/\s+\d+(동|호|층)/g, '') // 동/호/층 완벽 제거
-                    .replace(/지하\d+층/g, '') // 지하층 제거
-                    .replace(/B\d+/g, '') // B1 등 제거
-                    .trim(); 
-                 
-                // 도우미 함수: Nominatim 검색 (딜레이 추가로 API 차단 방지)
-                const search = async (query) => { 
-                    try { 
-                        // 짧은 지연을 주어 API 과부하/차단 방지
-                        await new Promise(r => setTimeout(r, 100)); 
-                        // 한국 내에서만 검색되도록 강제 (대한민국 키워드 추가)
-                        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=kr&limit=1`, {
-                            headers: {
-                                'Accept-Language': 'ko-KR,ko;q=0.9'
+                // 카카오맵 서비스 객체가 있는지 확인
+                if (!window.kakao || !window.kakao.maps || !window.kakao.maps.services) {
+                    console.error("Kakao Maps API services not loaded");
+                    return resolve(strict ? null : getRegionalFallback(address));
+                }
+
+                // [핵심 로직 개선] 주소 정제 - 한국 아파트 주소 형식 대응
+                // 예: "인천 남동구 소래역로 94 논현단풍마을트리플에듀 1101동203호"
+                // 1단계: 건물명까지 포함해서 검색 (동호수만 제거)
+                // 2단계 실패시: 도로명+번지만으로 재시도
+                let cleanAddress = address;
+                if (address) {
+                    const parts = address.split(/\s+/);
+                    const filteredParts = [];
+
+                    for (let i = 0; i < parts.length; i++) {
+                        const part = parts[i];
+                        const prevPart = i > 0 ? parts[i-1] : '';
+                        const isAfterRoad = prevPart.endsWith('로') || prevPart.endsWith('길') || /[로길]\d*번길$/.test(prevPart);
+
+                        // "1101동203호" 처럼 동호수가 붙어있는 경우 → 자름
+                        if (/^\d+동\d+호$/.test(part)) { break; }
+                        // "710동" 처럼 동만 있는 경우 (도로명 뒤 건물번호는 제외) → 자름
+                        if (/^\d+동$/.test(part) && !isAfterRoad) { break; }
+                        // "1402호", "203호" 처럼 호수/층수만 있는 경우 → 자름
+                        if (/^\d+호$/.test(part) || /^\d+층$/.test(part)) { break; }
+                        // "안쪽", "우측" 등 불필요한 설명어 → 자름
+                        if (['안쪽', '우측', '좌측', '내부', '앞', '뒤', '옆'].includes(part)) { break; }
+
+                        filteredParts.push(part);
+                    }
+                    cleanAddress = filteredParts.join(' ').trim();
+                }
+
+                const geocoder = new window.kakao.maps.services.Geocoder(); 
+                
+                geocoder.addressSearch(cleanAddress, (result, status) => { 
+                    if (status === window.kakao.maps.services.Status.OK) { 
+                        resolve({ lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) }); 
+                    } else {
+                        // 2단계: 건물명 제거하고 도로명+번지만으로 재시도
+                        const parts2 = cleanAddress.split(' ');
+                        let roadEndIdx = -1;
+                        for (let i = 0; i < parts2.length; i++) {
+                            if (parts2[i].endsWith('로') || parts2[i].endsWith('길') || /[로길]\d*번길$/.test(parts2[i])) {
+                                roadEndIdx = i;
                             }
-                        }); 
-                        const data = await res.json(); 
-                        if (data && data.length > 0) { 
-                            const lat = parseFloat(data[0].lat); 
-                            const lng = parseFloat(data[0].lon); 
-                            if (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) return null; 
-                            return { lat, lng }; 
-                        } 
-                    } catch(e) { return null; } 
-                    return null; 
-                }; 
+                        }
+                        const fallbackAddress = roadEndIdx >= 0
+                            ? parts2.slice(0, roadEndIdx + 2).join(' ')
+                            : parts2.slice(0, 4).join(' ');
 
-                // 전략 1: 도로명 주소 파싱 (시/군/구 + 도로명 + 건물번호) - 무료 API는 이 방식이 가장 정확함
-                const tokens = cleanAddr.split(/\s+/); 
-                 
-                let siDo = ""; 
-                let guGun = ""; 
-                let roadName = ""; 
-                let buildingNum = ""; 
-
-                // 역순으로 탐색하여 건물번호, 도로명 식별 
-                for (let i = tokens.length - 1; i >= 0; i--) { 
-                    const t = tokens[i]; 
-                    if (!buildingNum && /^\d+(-\d+)?$/.test(t)) { 
-                        buildingNum = t; 
-                        continue; 
+                        geocoder.addressSearch(fallbackAddress, (fbResult, fbStatus) => {
+                            if (fbStatus === window.kakao.maps.services.Status.OK) {
+                                resolve({ lat: parseFloat(fbResult[0].y), lng: parseFloat(fbResult[0].x) });
+                            } else {
+                                console.error(`[Geocoding Error] 주소 변환 실패\n원본: ${address}\n정제: ${cleanAddress}\n2단계: ${fallbackAddress}`);
+                                resolve(strict ? null : getRegionalFallback(address));
+                            }
+                        });
                     } 
-                    if (!roadName && (t.endsWith('로') || t.endsWith('길') || t.match(/[로길]\d+번길/))) { 
-                        roadName = t; 
-                        continue; 
-                    } 
-                    if (!guGun && (t.endsWith('구') || t.endsWith('군') || (t.endsWith('시') && t.length > 2))) { 
-                        guGun = t; 
-                        continue; 
-                    } 
-                    if (!siDo && (t.endsWith('시') || t.endsWith('도'))) { 
-                        siDo = t; 
-                    } 
-                } 
-
-                let result = null;
-
-                // 1순위: 파싱된 도로명 주소로 정밀 검색
-                if (roadName && buildingNum) { 
-                    if (siDo && guGun) { 
-                        result = await search(`${siDo} ${guGun} ${roadName} ${buildingNum}`); 
-                        if (result) return result; 
-                    } 
-                    if (guGun) { 
-                        result = await search(`${guGun} ${roadName} ${buildingNum}`); 
-                        if (result) return result; 
-                    } 
-                    result = await search(`${roadName} ${buildingNum}`); 
-                    if (result) return result; 
-                } 
-
-                // 2순위: 전체 주소 검색 (정제된 상태)
-                result = await search(cleanAddr); 
-                if (result) return result; 
-
-                // 3순위: 상세주소(마지막 어절) 계속 제거하면서 검색 (Fallback)
-                let fallbackTokens = [...tokens];
-                while (fallbackTokens.length > 2) {
-                    fallbackTokens.pop();
-                    result = await search(fallbackTokens.join(' '));
-                    if (result) return result;
-                }
-
-                // 4순위: 동/읍/면 단위까지만 검색 시도
-                const dongToken = tokens.find(t => t.endsWith('동') || t.endsWith('읍') || t.endsWith('면'));
-                if (dongToken) {
-                    if (siDo && guGun) {
-                        result = await search(`${siDo} ${guGun} ${dongToken}`);
-                        if (result) return result;
-                    }
-                    if (guGun) {
-                        result = await search(`${guGun} ${dongToken}`);
-                        if (result) return result;
-                    }
-                }
-
-            } catch (e) { console.error("Geocoding failed", e); } 
-             
-            // Strict 모드일 경우 Fallback 사용 안 함 
-            if (strict) return null; 
-
-            // [Fallback] 모든 검색 실패 시 지역별 중심 좌표 반환
-            return getRegionalFallback(address);
+                }); 
+            }); 
         }
         
         // 검색 완전 실패 시 지역별 시청/도청 좌표 반환 (바다 방지용)
@@ -871,158 +871,261 @@
             return path;
         }
 
-        // [컴포넌트] 지도 (사용자 코드 기반 + 디자인 및 줌 버그 픽스 병합)
+        // [컴포넌트] 지도 (카카오 지도 API 완벽 연동 버전 + 디자인 및 줌 버그 픽스 병합)
         function MapView({ locations, center, startPoint }) { 
             const mapRef = useRef(null); 
             const mapInstance = useRef(null); 
+            const markersRef = useRef([]); // 마커(커스텀 오버레이) 저장 
             const polylineRef = useRef(null); 
+            const [mapLoaded, setMapLoaded] = useState(false);
  
             // 데이터 변경을 감지하기 위한 의존성 문자열 (무한 렌더링 방지용)
             const locationsStr = JSON.stringify(locations || []); 
             const startStr = JSON.stringify(startPoint || null); 
             const centerStr = JSON.stringify(center || null);
 
+            // [Fix] 카카오맵 API 스크립트가 비동기로 로드될 때까지 기다렸다가 렌더링하도록 처리
+            useEffect(() => {
+                let checkInterval;
+                
+                const initMap = () => {
+                    if (window.kakao && window.kakao.maps) {
+                        window.kakao.maps.load(() => {
+                            setMapLoaded(true);
+                        });
+                        return true;
+                    }
+                    return false;
+                };
+
+                // 1. 즉시 확인
+                if (!initMap()) {
+                    // 2. 없으면 0.1초마다 확인
+                    checkInterval = setInterval(() => {
+                        if (initMap()) {
+                            clearInterval(checkInterval);
+                        }
+                    }, 100);
+                }
+
+                // 3. 5초 뒤에는 무조건 인터벌 종료 (무한루프 방지)
+                const timeoutId = setTimeout(() => {
+                    if (checkInterval) clearInterval(checkInterval);
+                }, 5000);
+
+                return () => {
+                    if (checkInterval) clearInterval(checkInterval);
+                    clearTimeout(timeoutId);
+                };
+            }, []);
+ 
             useEffect(() => { 
-                if (!mapRef.current) return; 
+                // [Fix] 카카오 객체가 없거나 아직 로드되지 않았다면 조기 종료
+                if (!window.kakao || !window.kakao.maps || !mapLoaded || !mapRef.current) return; 
                  
-                // [디버그] 마커 상태 로그 (사용자 제공 코드 반영)
+                // [디버그] 마커 상태 로그 
                 console.log(`[Map] 렌더링: 활성 마커 ${locations.length}개, 중심: ${center?.address || 'N/A'}`); 
  
                 // 초기화 
                 if (!mapInstance.current) { 
-                    mapInstance.current = L.map(mapRef.current, { 
-                        zoomControl: false, // 줌 컨트롤(+/-) 제거 (사용자 코드 반영)
-                        preferCanvas: false // [Fix] 확대/축소 시 DOM 마커 사라짐 버그 방지
-                    }).setView([center?.lat || 37.5665, center?.lng || 126.9780], 12); 
+                    const centerLat = (center && typeof center.lat === 'number') ? center.lat : 37.5665;
+                    const centerLng = (center && typeof center.lng === 'number') ? center.lng : 126.9780;
                     
-                    // [Fix] Leaflet 내장 기본 pane 중 markerPane의 z-index를 직접 조정하여 마커 숨김 방지
-                    mapInstance.current.getPane('markerPane').style.zIndex = 650;
-                    mapInstance.current.getPane('popupPane').style.zIndex = 700;
+                    const options = { 
+                        center: new window.kakao.maps.LatLng(centerLat, centerLng), 
+                        level: 4 
+                    }; 
+                    mapInstance.current = new window.kakao.maps.Map(mapRef.current, options); 
+                } 
+ 
+                const map = mapInstance.current; 
 
-                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' }).addTo(mapInstance.current); 
-                } else { 
-                    // [Fix] 1번 배송지가 있다면 1번 배송지를 중심으로 줌인 이동
-                    const firstDelivery = locations.find(g => (g.sequence_number === 1 || g.sequence_number === '1' || locations.indexOf(g) === 0) && g.type !== 'start' && g.type !== 'destination');
-                    
-                    if (firstDelivery && !isNaN(Number(firstDelivery.lat)) && !isNaN(Number(firstDelivery.lng))) {
-                        mapInstance.current.setView([Number(firstDelivery.lat), Number(firstDelivery.lng)], 16);
-                    } else if (center && center.lat && center.lng) {
-                        mapInstance.current.setView([center.lat, center.lng], 12); 
+                // 2. 이전 마커 및 선 제거 (메모리 관리 및 깜빡임 방지) 
+                markersRef.current.forEach(overlay => overlay.setMap(null)); 
+                markersRef.current = []; 
+                if (polylineRef.current) polylineRef.current.setMap(null); 
+ 
+                const bounds = new window.kakao.maps.LatLngBounds(); 
+                const path = []; 
+                let hasValidPoints = false; // 유효한 좌표가 하나라도 있는지 체크
+ 
+                // 전역 팝업 관리 함수 (카카오맵용)
+                if (!window.activeKakaoPopup) window.activeKakaoPopup = null;
+                const closePopup = () => {
+                    if (window.activeKakaoPopup) {
+                        window.activeKakaoPopup.setMap(null);
+                        window.activeKakaoPopup = null;
                     }
-                } 
- 
-                // 마커 클리어 (사용자 제공 코드 방식)
-                mapInstance.current.eachLayer(layer => { 
-                    if (layer instanceof L.Marker || layer instanceof L.Polyline) mapInstance.current.removeLayer(layer); 
-                }); 
- 
-                // 1. 출발지 마커 (물방울 디자인 병합)
+                };
+                window.closeKakaoPopup = closePopup;
+
+                // 3. 출발지 마커 (물방울 디자인 병합)
                 if (startPoint && !isNaN(startPoint.lat) && !isNaN(startPoint.lng)) { 
-                    const startIcon = L.divIcon({ 
-                        className: 'custom-div-icon', 
-                        html: `<div class="marker-pin" style="background: #2563eb;"></div><div class="marker-text" style="color: #2563eb;">🚩</div>`, 
-                        iconSize: [36, 36],
-                        iconAnchor: [18, 36]
+                    const startPos = new window.kakao.maps.LatLng(startPoint.lat, startPoint.lng); 
+                    
+                    const markerContent = document.createElement('div');
+                    markerContent.style.width = '36px';
+                    markerContent.style.height = '36px';
+                    markerContent.style.position = 'relative';
+                    markerContent.style.cursor = 'pointer';
+                    markerContent.innerHTML = `<div class="marker-pin" style="background: #2563eb;"></div><div class="marker-text" style="color: #2563eb;">🚩</div>`;
+                    
+                    const customOverlay = new window.kakao.maps.CustomOverlay({ 
+                        position: startPos, 
+                        content: markerContent, 
+                        yAnchor: 1.35,
+                        zIndex: 3
                     }); 
-                    const startMarker = L.marker([startPoint.lat, startPoint.lng], { icon: startIcon }).addTo(mapInstance.current).bindPopup("🚩 출발지 (물류센터)"); 
-                    startMarker.off('click'); 
-                    startMarker.on('click', function() { 
-                        if (this.isPopupOpen()) this.closePopup(); 
-                        else this.openPopup(); 
-                    }); 
+
+                    // 팝업 오버레이
+                    const popupOverlay = new window.kakao.maps.CustomOverlay({
+                        position: startPos,
+                        content: `<div class="p-2 min-w-[120px] bg-white rounded-xl shadow-lg border border-gray-200 text-center font-bold text-sm mb-12">🚩 출발지 (물류센터)</div>`,
+                        yAnchor: 1.0,
+                        zIndex: 10
+                    });
+
+                    markerContent.onclick = () => {
+                        if (window.activeKakaoPopup === popupOverlay) {
+                            closePopup();
+                        } else {
+                            closePopup();
+                            popupOverlay.setMap(map);
+                            window.activeKakaoPopup = popupOverlay;
+                        }
+                    };
+
+                    customOverlay.setMap(map); 
+                    markersRef.current.push(customOverlay);
+                    bounds.extend(startPos); 
+                    path.push(startPos); 
+                    hasValidPoints = true;
                 } 
  
-                // 2. 배송지 및 도착지 마커 (사용자 루프 + 디자인 병합)
+                // 4. 배송지 및 도착지 마커 (사용자 루프 + 디자인 병합)
                 locations.forEach((group, idx) => { 
                     // [안전장치] 좌표 유효성 검사 
                     if (!group.lat || !group.lng || isNaN(group.lat) || isNaN(group.lng)) return; 
  
-                    // [도착지(집) 마커] 
+                    const pos = new window.kakao.maps.LatLng(group.lat, group.lng); 
+                    bounds.extend(pos); 
+                    path.push(pos); 
+                    hasValidPoints = true;
+
+                    const markerContent = document.createElement('div');
+                    markerContent.style.width = '36px';
+                    markerContent.style.height = '36px';
+                    markerContent.style.position = 'relative';
+                    markerContent.style.cursor = 'pointer';
+
+                    let popupHtml = '';
+
+                    // [도착지 마커] - 명시적 타입
                     if (group.type === 'destination') { 
-                        const icon = L.divIcon({ 
-                            className: 'custom-div-icon', 
-                            html: `<div class="marker-pin" style="background: #10b981;"></div><div class="marker-text" style="color: #10b981; font-size: 16px;">🏠</div>`, 
-                            iconSize: [36, 36], 
-                            iconAnchor: [18, 36] 
-                        }); 
-                        const destMarker = L.marker([group.lat, group.lng], { icon }).addTo(mapInstance.current) 
-                         .bindPopup(`<div class="font-bold text-center p-2">🏠 도착지(집)<br/><span class="text-xs text-gray-500">${group.address}</span></div>`); 
-                        destMarker.off('click'); 
-                        destMarker.on('click', function() { 
-                            if (this.isPopupOpen()) this.closePopup(); 
-                            else this.openPopup(); 
-                        }); 
-                        return; 
+                        markerContent.innerHTML = `<div class="marker-pin" style="background: #10b981;"></div><div class="marker-text" style="color: #10b981; font-size: 13px; top: 7px; left: -1px; letter-spacing: -1px;">도착</div>`;
+                        popupHtml = `<div class="p-2 min-w-[150px] bg-white rounded-xl shadow-lg border border-gray-200 mb-12"><div class="font-bold text-center">🏠 도착지<br/><span class="text-xs text-gray-500">${group.address}</span></div></div>`;
                     } 
- 
-                    // [일반 배송지 마커] 
-                    const seqNum = group.sequence_number || (idx + 1);
-                    const icon = L.divIcon({ 
-                        className: 'custom-div-icon', 
-                        html: `<div class="marker-pin" style="background: #ef4444;"></div><div class="marker-text" style="color: #ef4444; top: 7px; left: -1px;">${seqNum}</div>`, 
-                        iconSize: [36, 36], 
-                        iconAnchor: [18, 36] 
-                    }); 
-                     
-                    const popupContent = ` 
-                        <div class="p-4 min-w-[280px] bg-white rounded-2xl"> 
-                            <div class="flex items-center gap-3 mb-3"> 
-                                <span class="bg-[#d9534f] text-white text-sm font-bold px-3 py-1 rounded-full shadow-sm">${seqNum}번</span> 
-                                <span class="font-bold text-lg text-gray-800">${group.phone || ''}</span> 
-                            </div> 
-                            <div class="flex items-start gap-2 mb-4">
-                                <span class="text-[#d9534f] text-lg mt-0.5">📍</span>
-                                <span class="text-[15px] font-medium text-gray-800 leading-snug">${group.address || '주소 정보 없음'}</span> 
-                            </div> 
-                            <div class="border-t border-gray-100 pt-4"> 
-                                <ul class="list-disc pl-4 text-sm space-y-0.5 text-gray-700 mb-3"> 
-                                    ${(group.items || []).map(i => `<li>${i.item}</li>`).join('')} 
-                                </ul>
-                                <div class="flex gap-2"> 
-                                    <button onclick="window.handleAppNavigation(${group.lat}, ${group.lng}, '${(group.address || '').replace(/'/g, "\\'")}')" class="flex-1 bg-[#d9534f] hover:bg-[#c9302c] text-white font-bold py-2.5 rounded-xl flex items-center justify-center transition shadow-md text-sm"> 
-                                        배송출발 
-                                    </button> 
-                                    <button onclick="window.handlePopupSequenceChange('${(group.ids || []).join(',')}')" class="flex-1 bg-[#5bc0de] hover:bg-[#31b0d5] text-white font-bold py-2.5 rounded-xl flex items-center justify-center transition shadow-md text-sm"> 
-                                        순서변경 
-                                    </button> 
-                                    <button onclick="document.querySelector('.leaflet-popup-close-button').click()" class="flex-1 bg-[#e2e8f0] hover:bg-[#cbd5e1] text-[#475569] font-bold py-2.5 rounded-xl flex items-center justify-center transition shadow-md text-sm"> 
-                                        닫기 
-                                    </button> 
+                    // [출발지 마커] - 명시적 타입 (기존 locations 배열에 startPoint가 포함되어 넘어올 경우)
+                    else if (group.type === 'start') {
+                        markerContent.innerHTML = `<div class="marker-pin" style="background: #2563eb;"></div><div class="marker-text" style="color: #2563eb; font-size: 13px; top: 7px; left: -1px; letter-spacing: -1px;">출발</div>`;
+                        popupHtml = `<div class="p-2 min-w-[150px] bg-white rounded-xl shadow-lg border border-gray-200 mb-12"><div class="font-bold text-center">🚩 출발지<br/><span class="text-xs text-gray-500">${group.address}</span></div></div>`;
+                    } 
+                    else { 
+                        // [일반 배송지 마커] - sequence_number 우선, 없으면 출발지/도착지 제외한 순수 배송지 인덱스
+                        const deliveryOnlyIdx = locations.filter(l => !l.type).indexOf(group) + 1;
+                        const seqNum = group.sequence_number || deliveryOnlyIdx || (idx + 1);
+                        markerContent.innerHTML = `<div class="marker-pin" style="background: #ef4444;"></div><div class="marker-text" style="color: #ef4444; top: 7px; left: -1px;">${seqNum}</div>`;
+                        
+                        popupHtml = ` 
+                            <div class="p-4 min-w-[280px] bg-white rounded-2xl shadow-xl border border-gray-200 mb-12"> 
+                                <div class="flex items-center gap-3 mb-3"> 
+                                    <span class="bg-[#d9534f] text-white text-sm font-bold px-3 py-1 rounded-full shadow-sm">${seqNum}번</span> 
+                                    <span class="font-bold text-lg text-gray-800">${group.phone || ''}</span> 
+                                </div> 
+                                <div class="flex items-start gap-2 mb-4">
+                                    <span class="text-[#d9534f] text-lg mt-0.5">📍</span>
+                                    <span class="text-[15px] font-medium text-gray-800 leading-snug">${group.address || '주소 정보 없음'}</span> 
+                                </div> 
+                                <div class="border-t border-gray-100 pt-4"> 
+                                    <ul class="list-disc pl-4 text-sm space-y-0.5 text-gray-700 mb-3"> 
+                                        ${(group.items || []).map(i => `<li>${i.item}</li>`).join('')} 
+                                    </ul>
+                                    <div class="flex gap-2"> 
+                                        <button onclick="window.handleAppNavigation(${group.lat}, ${group.lng}, '${(group.address || '').replace(/'/g, "\\'")}')" class="flex-1 bg-[#d9534f] hover:bg-[#c9302c] text-white font-bold py-2.5 rounded-xl flex items-center justify-center transition shadow-md text-sm"> 
+                                            배송출발 
+                                        </button> 
+                                        <button onclick="window.handlePopupSequenceChange('${(group.ids && Array.isArray(group.ids) ? group.ids : []).join(',')}')" class="flex-1 bg-[#5bc0de] hover:bg-[#31b0d5] text-white font-bold py-2.5 rounded-xl flex items-center justify-center transition shadow-md text-sm"> 
+                                            순서변경 
+                                        </button> 
+                                        <button onclick="window.closeKakaoPopup()" class="flex-1 bg-[#e2e8f0] hover:bg-[#cbd5e1] text-[#475569] font-bold py-2.5 rounded-xl flex items-center justify-center transition shadow-md text-sm"> 
+                                            닫기 
+                                        </button> 
+                                    </div> 
                                 </div> 
                             </div> 
-                        </div> 
-                    `; 
-                    const marker = L.marker([group.lat, group.lng], { icon }).addTo(mapInstance.current).bindPopup(popupContent); 
-                    marker.off('click'); 
-                    marker.on('click', function() { 
-                        if (this.isPopupOpen()) { 
-                            this.closePopup(); 
-                        } else { 
-                            this.openPopup(); 
-                        } 
+                        `; 
+                    } 
+ 
+                    const customOverlay = new window.kakao.maps.CustomOverlay({ 
+                        position: pos, 
+                        content: markerContent, 
+                        yAnchor: 1.35, 
+                        zIndex: group.type === 'destination' ? 2 : 3
                     }); 
+
+                    const popupOverlay = new window.kakao.maps.CustomOverlay({
+                        position: pos,
+                        content: popupHtml,
+                        yAnchor: 1.0,
+                        zIndex: 10
+                    });
+
+                    markerContent.onclick = () => {
+                        if (window.activeKakaoPopup === popupOverlay) {
+                            closePopup();
+                        } else {
+                            closePopup();
+                            popupOverlay.setMap(map);
+                            window.activeKakaoPopup = popupOverlay;
+                        }
+                    };
+ 
+                    customOverlay.setMap(map); 
+                    markersRef.current.push(customOverlay); 
                 }); 
  
-                // 3. 경로 선 그리기 (사용자 제공 코드 기반)
-                if (startPoint && locations.length > 0) { 
-                    const latlngs = [ 
-                        [startPoint.lat, startPoint.lng], 
-                        ...locations.map(l => [l.lat, l.lng]) 
-                    ].filter(pos => !isNaN(pos[0]) && !isNaN(pos[1])); // 유효한 좌표만 필터링
-                    
-                    if (latlngs.length >= 2) {
-                        L.polyline(latlngs, { color: '#2563eb', weight: 4, opacity: 0.7, dashArray: '10, 10' }).addTo(mapInstance.current); 
-                    }
+                // 5. 경로 선 그리기 (사용자 제공 코드 기반)
+                if (path.length >= 2) { 
+                    polylineRef.current = new window.kakao.maps.Polyline({ 
+                        path: path, 
+                        strokeWeight: 4, 
+                        strokeColor: '#2563eb', 
+                        strokeOpacity: 0.7, 
+                        strokeStyle: 'shortdash' 
+                    }); 
+                    polylineRef.current.setMap(map); 
                 } 
  
-            }, [locationsStr, startStr, centerStr]); 
+                // 6. 모든 마커가 화면에 들어오도록 자동 줌 조절
+                if (hasValidPoints) { 
+                    // 약간의 여백(padding)을 주어 마커가 화면 끝에 걸치지 않도록 설정
+                    map.setBounds(bounds, 50, 50, 50, 50); 
+                }
+ 
+            }, [locationsStr, startStr, centerStr, mapLoaded]); 
  
             return ( 
                 <div  
                     ref={mapRef}  
-                    className="map-container mb-4 shadow-inner bg-gray-100 rounded-xl" 
-                    style={{ height: '350px', width: '100%', zIndex: 1, position: 'relative' }} 
-                ></div> 
+                    className="map-container mb-4 shadow-inner rounded-xl" 
+                    style={{ height: '400px', width: '100%', backgroundColor: '#eee', zIndex: 1, position: 'relative' }} 
+                >
+                    {!mapLoaded && (
+                        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#666' }}>
+                            지도를 불러오는 중입니다...
+                        </div>
+                    )}
+                </div> 
             ); 
         }
 
@@ -1723,7 +1826,7 @@
                 else if (target.detail_items && target.detail_items.length > 0) {
                     const newItems = target.detail_items.map(dt => ({
                         ...target,
-                        id: crypto.randomUUID(), // 새로운 ID 발급
+                        id: generateUUID(), // 새로운 ID 발급
                         item: dt.item,
                         install_fee: dt.install_fee || 0,
                         yangjung: dt.yangjung || 0,
@@ -2122,12 +2225,22 @@
                     }
 
                     // 4. Load Settings (Start/End Points)
-                    // Start Point
+                    // Start Point - 각 사용자가 직접 설정 (하드코딩 없음)
                     let start = StorageManager.get('mvp_start_point');
-                    if (!start) {
-                        start = { ...Config.FIXED_START };
-                        // Fallback Geocoding omitted for speed
-                        StorageManager.set('mvp_start_point', start);
+                    // 저장된 출발지가 없거나 주소가 비어있으면 null (사용자가 직접 설정해야 함)
+                    if (!start || !start.address) {
+                        start = null;
+                        StorageManager.remove('mvp_start_point');
+                    } else if (!start.lat || !start.lng || isNaN(start.lat) || isNaN(start.lng)) {
+                        // 주소는 있는데 좌표가 없으면 지오코딩으로 자동 보정
+                        geocodeAddress(start.address, false).then(coords => {
+                            if (coords) {
+                                const corrected = { ...start, lat: coords.lat, lng: coords.lng };
+                                setStartPoint(corrected);
+                                StorageManager.set('mvp_start_point', corrected);
+                                console.log('[StartPoint] 좌표 자동 보정:', corrected);
+                            }
+                        });
                     }
                     setStartPoint(start);
 
@@ -2343,6 +2456,14 @@
             
 
             
+            // [Auto Save] 출발지/도착지 변경 시 자동 저장 로직 추가
+            useEffect(() => {
+                if (!loading && window.__isAppReady) {
+                    // startPoint나 endPoint가 변경될 때마다 전체 데이터 통합 저장
+                    StorageManager.saveAllData(deliveries, startPoint, endPoint);
+                }
+            }, [startPoint, endPoint]);
+
             // [Auto Save] deliveries 변경 시 로컬 스토리지 저장 및 서버 동기화
             useEffect(() => {
                 // [Fix] 초기 렌더링 시 빈 배열로 덮어씌워지는 현상 완벽 방지
@@ -2361,8 +2482,8 @@
                 }
 
                 // 로컬 스토리지에 데이터가 있는지 확인
-                const rawLocalData = localStorage.getItem(Config.STORAGE_KEYS.DELIVERIES);
-                const hasLocalData = rawLocalData && rawLocalData !== '[]';
+                const rawLocalData = localStorage.getItem('deliveryData') || localStorage.getItem(Config.STORAGE_KEYS.DELIVERIES);
+                const hasLocalData = rawLocalData && rawLocalData !== '[]' && rawLocalData !== '{}';
 
                 // 3. state(deliveries)는 비어있는데 로컬스토리지에는 데이터가 있다면?
                 // -> 아직 로컬 데이터를 state에 다 옮겨담지 못한 '렌더링 타이밍 차이'일 확률이 높음 (덮어쓰기 방지)
@@ -2374,7 +2495,7 @@
                 // 서버에서 가져온 데이터를 세팅하는 중이라면, 로컬에만 살짝 업데이트하고 서버 전송은 스킵
                 if (isRemoteUpdate.current) {
                     console.log('[AutoSave] Skipped cloud push due to remote update');
-                    localStorage.setItem(Config.STORAGE_KEYS.DELIVERIES, JSON.stringify(deliveries));
+                    StorageManager.saveAllData(deliveries, startPoint, endPoint);
                     isRemoteUpdate.current = false;
                     return;
                 }
@@ -2382,12 +2503,12 @@
                 // 4. 정상적인 저장 로직
                 if (deliveries.length > 0) {
                     // 데이터가 1개 이상 있으면 무조건 저장
-                    StorageManager.saveDeliveries(deliveries);
+                    StorageManager.saveAllData(deliveries, startPoint, endPoint);
                 } else if (deliveries.length === 0 && !hasLocalData) {
                     // 완전히 새로운 빈 상태이거나 사용자가 '전체 삭제'를 눌러 로컬도 비워진 상태일 때만 빈 배열 저장
-                    StorageManager.saveDeliveries([]);
+                    StorageManager.saveAllData([], startPoint, endPoint);
                 }
-            }, [deliveries, loading]);
+            }, [deliveries]);
 
             // [Auto Geocode] 좌표가 없는 데이터 자동 변환
             useEffect(() => {
@@ -2598,74 +2719,42 @@
                             }
                         }
 
-                        // 2. Load Start Point
-                        let start = StorageManager.get('mvp_start_point');
-                        if (!start) {
-                            start = { ...Config.FIXED_START };
-                            try {
-                                // 출발지 주소도 번지까지만 잘라서 정확도 향상
-                                let cleanAddr = Config.FIXED_START.address;
-                                const tokens = cleanAddr.split(/\s+/);
-                                let targetIndex = -1;
-                                for (let i = 0; i < tokens.length; i++) {
-                                    if (/^\d+(-\d+)?$/.test(tokens[i]) || tokens[i].endsWith('번지')) {
-                                        targetIndex = i;
-                                        break;
-                                    }
-                                }
-                                if (targetIndex !== -1) {
-                                    cleanAddr = tokens.slice(0, targetIndex + 1).join(' ');
-                                } else if (tokens.length > 4) {
-                                    cleanAddr = tokens.slice(0, 4).join(' ');
-                                }
+                        // 2. Load Start Point & End Point (통합 객체 지원 - 최우선)
+                        const unifiedData = StorageManager.get('deliveryData');
+                        
+                        let start = null;
+                        let end = null;
 
-                                const coords = await geocodeAddress(cleanAddr);
-                                if (coords && (coords.lat !== 37.5665 || coords.lng !== 126.9780)) {
-                                     start = { ...coords, address: Config.FIXED_START.address };
-                                }
-                            } catch(e) { console.warn("Start point geocoding fallback"); }
-                            StorageManager.set('mvp_start_point', start);
+                        if (unifiedData) {
+                            if (unifiedData.start_location) start = unifiedData.start_location;
+                            if (unifiedData.destination) end = unifiedData.destination;
                         }
-                        setStartPoint(start);
 
-                        // 3. Load End Point
+                        // 통합 데이터에 없으면 개별 키(하위 호환성) 확인
+                        if (!start) {
+                            const startStr = localStorage.getItem(Config.STORAGE_KEYS.START_LOCATION) || localStorage.getItem('mvp_start_point');
+                            if (startStr && startStr !== "undefined") {
+                                try { start = JSON.parse(startStr); } catch(e) {}
+                            }
+                        }
+                        
                         const sessionDriver = localStorage.getItem('delivery_app_session_driver');
                         const endKey = sessionDriver ? `mvp_end_point_${sessionDriver}` : 'mvp_end_point';
-                        let end = StorageManager.get(endKey);
-                        
-                        // [변경] 도착지 자동 설정 해제 (User Request)
-                        // 기사가 최초 로그인 시 직접 설정하도록 유도하기 위해 기본값(FIXED_END) 적용 로직 제거
+                        if (!end) {
+                            const endStr = localStorage.getItem(Config.STORAGE_KEYS.END_LOCATION) || localStorage.getItem(endKey);
+                            if (endStr && endStr !== "undefined") {
+                                try { end = JSON.parse(endStr); } catch(e) {}
+                            }
+                        }
+
+                        // 둘 다 없으면 기본값 세팅 안 함 (기사가 직접 입력하도록 비워둠)
                         
                         // [Safety] 기존 데이터에 type이 없는 경우 보정
                         if (end && end.type !== 'destination') {
                             end = { ...end, type: 'destination' };
                         }
-
-                        // 도착지 좌표가 없거나 변경된 로직을 적용하기 위해 지오코딩 재시도
-                        if (end && end.address && (!end.lat || !end.lng)) {
-                            try {
-                                let cleanAddr = end.address;
-                                const tokens = cleanAddr.split(/\s+/);
-                                let targetIndex = -1;
-                                for (let i = 0; i < tokens.length; i++) {
-                                    if (/^\d+(-\d+)?$/.test(tokens[i]) || tokens[i].endsWith('번지')) {
-                                        targetIndex = i;
-                                        break;
-                                    }
-                                }
-                                if (targetIndex !== -1) {
-                                    cleanAddr = tokens.slice(0, targetIndex + 1).join(' ');
-                                } else if (tokens.length > 4) {
-                                    cleanAddr = tokens.slice(0, 4).join(' ');
-                                }
-                                const coords = await geocodeAddress(cleanAddr);
-                                if (coords) {
-                                    end = { ...end, ...coords };
-                                    StorageManager.set(endKey, end);
-                                }
-                            } catch(e) { console.warn("End point geocoding fallback"); }
-                        }
                         
+                        setStartPoint(start);
                         setEndPoint(end);
                         
                         // 4. Load Notice
@@ -2900,7 +2989,7 @@
                     });
                 }
 
-                // 5. 순번 할당 및 속성 추가
+                // 5. 순번 할당 및 속성 추가 (출발지와 도착지 제외)
                 const finalActive = sortedActive.map((g, i) => ({
                     ...g,
                     sequence_number: i + 1,
@@ -2913,8 +3002,11 @@
                     is_active: false
                 }));
 
-                return [...finalActive, ...finalInactive];
-            }, [deliveries, targetDate, startPoint, currentUser, adminDriverFilter, view]); // [Fix] view 의존성 추가
+                // 6. 마커 렌더링용 배열 재구성: 순수 배송지 목록만 반환
+                // 출발지/도착지는 MapView에 startPoint prop으로 별도 전달하므로 여기서는 제외
+                const mapLocations = [...finalActive, ...finalInactive];
+                return mapLocations;
+            }, [deliveries, targetDate, startPoint, endPoint, currentUser, adminDriverFilter, view, showAllDates]); // [Fix] view, showAllDates, endPoint 의존성 추가
 
             // [Sync] 계산된 순서(TSP 또는 수동)를 데이터 상태에 반영 (Persist Order)
             useEffect(() => {
@@ -2958,7 +3050,7 @@
                 (async () => {
                     const updates = [];
                     for (const d of toGeocode.slice(0, 10)) {
-                        const addr = formatAddressDisplay(d.address || '');
+                        const addr = d.address || ''; // [Fix] formatAddressDisplay() 대신 원본 주소 직접 사용 (표시용 함수 거치면 주소 정보 손실됨)
                         let coords = await geocodeAddress(addr, true);
                         if (!coords) coords = await geocodeAddress(addr, false);
                         if (coords) {
@@ -3411,7 +3503,7 @@
                 }
 
                 const newItem = {
-                    id: crypto.randomUUID(),
+                    id: generateUUID(),
                     date: form.reservationDate || form.date, 
                     driver: assignedDriver, // 기사 배정
                     item: form.item,
@@ -3892,7 +3984,7 @@
                             displayItem = `${displayItem} 외 ${group.items.length - 1}건`;
                         }
                         results.push({
-                            id: crypto.randomUUID(),
+                            id: generateUUID(),
                             date: parseCustomDate(group.rawDate),
                             order_number: group.order_number,
                             invoice_number: group.invoice_number,
@@ -4033,7 +4125,7 @@
                     while (i < pending.length) {
                         const idx = i++;
                         const d = pending[idx];
-                        const addr = formatAddressDisplay(d.address);
+                        const addr = d.address || '';  // [Fix] formatAddressDisplay 대신 원본 주소 직접 사용
                         let c = await geocodeAddress(addr, true);
                         if (!c) c = await geocodeAddress(addr, false);
                         
@@ -4200,7 +4292,7 @@
                 if (!coords) coords = await geocodeAddress(address, false);
                 
                 const newDelivery = {
-                    id: crypto.randomUUID(),
+                    id: generateUUID(),
                     date,
                     item,
                     address,
@@ -4248,7 +4340,7 @@
                 Promise.all(testData.map(async (d, i) => {
                     const coords = await geocodeAddress(d.address);
                     return {
-                        id: crypto.randomUUID(),
+                        id: generateUUID(),
                         date: today,
                         time: `오전 ${9 + i}:00`,
                         item: d.item,
@@ -5244,8 +5336,8 @@ ${logContent}
                                                         <span>↺</span> 자동 백업 복구
                                                     </button>
                                                     <button onClick={() => {
-                                                        if (!confirm('모든 데이터가 삭제됩니다. 진행하시겠습니까?')) return;
-                                                        localStorage.removeItem(Config.STORAGE_KEYS.DELIVERIES);
+                                                        if (!confirm('배송 목록, 출발지, 도착지 등 모든 데이터가 삭제됩니다. 진행하시겠습니까?')) return;
+                                                        StorageManager.clearAll();
                                                         location.reload();
                                                     }} className="col-span-2 bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 transition text-sm shadow-md flex items-center justify-center gap-2">
                                                         🗑 전체 데이터 초기화
@@ -5353,7 +5445,7 @@ ${logContent}
                                                                 <button 
                                                                     onClick={() => {
                                                                         const dates = [...new Set(deliveries.map(d => d.date))].sort();
-                                                                        alert(`데이터가 있는 날짜 목록:\n${dates.join(', ')}`);
+                                                                        alert(`데이터가 있는 날짜 목록:\n${(dates || []).join(', ')}`);
                                                                     }}
                                                                     className="bg-white border border-indigo-200 px-3 py-1 rounded shadow-sm hover:bg-indigo-50"
                                                                 >
@@ -5547,9 +5639,8 @@ ${logContent}
                                         )}
                                         <MapView 
                                             locations={[
-                                                ...(startPoint ? [{...startPoint, type: 'start'}] : []),
                                                 ...groupedDeliveries.filter(d => d.is_active && !d.completed).slice(0, 30),
-                                                ...(endPoint ? [endPoint] : [])
+                                                ...(endPoint ? [{...endPoint, type: 'destination'}] : [])
                                             ]} 
                                             center={
                                                 groupedDeliveries.find(d => d.is_active && !d.completed && d.lat && d.lng && !isNaN(d.lat) && !isNaN(d.lng)) 
@@ -5585,7 +5676,7 @@ ${logContent}
                                     {(() => {
                                         const firstActiveUncompletedIndex = groupedDeliveries.findIndex(g => g.is_active && !g.completed);
                                         return groupedDeliveries.map((group, idx) => {
-                                        const groupId = group.ids.join('_');
+                                        const groupId = (group.ids || []).join('_') || group.id || String(Math.random());
                                         const isExpanded = expandedGroups[groupId] === true; // Default Closed
                                         const dist = startPoint && group.lat && group.lng ? getDistance(startPoint.lat, startPoint.lng, group.lat, group.lng).toFixed(1) : null;
                                         const directInstall = ((group.address || '').includes('고객직접설치') || (group.address || '').includes('직접설치'));
