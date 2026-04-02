@@ -1036,33 +1036,19 @@
                         const seqNum = group.sequence_number || deliveryOnlyIdx || (idx + 1);
                         markerContent.innerHTML = `<div class="marker-pin" style="background: #ef4444;"></div><div class="marker-text" style="color: #ef4444; top: 7px; left: -1px;">${seqNum}</div>`;
                         
-                        popupHtml = ` 
-                            <div class="p-4 min-w-[280px] bg-white rounded-2xl shadow-xl border border-gray-200 mb-12"> 
-                                <div class="flex items-center gap-3 mb-3"> 
-                                    <span class="bg-[#d9534f] text-white text-sm font-bold px-3 py-1 rounded-full shadow-sm">${seqNum}번</span> 
-                                    <span class="font-bold text-lg text-gray-800">${group.phone || ''}</span> 
-                                </div> 
-                                <div class="flex items-start gap-2 mb-4">
-                                    <span class="text-[#d9534f] text-lg mt-0.5">📍</span>
-                                    <span class="text-[15px] font-medium text-gray-800 leading-snug">${group.address || '주소 정보 없음'}</span> 
-                                </div> 
-                                <div class="border-t border-gray-100 pt-4"> 
-                                    <ul class="list-disc pl-4 text-sm space-y-0.5 text-gray-700 mb-3"> 
-                                        ${(group.items || []).map(i => `<li>${i.item}</li>`).join('')} 
-                                    </ul>
-                                    <div class="flex gap-2"> 
-                                        <button onclick="window.handleAppNavigation(${group.lat}, ${group.lng}, '${(group.address || '').replace(/'/g, "\\'")}')" class="flex-1 bg-[#d9534f] hover:bg-[#c9302c] text-white font-bold py-2.5 rounded-xl flex items-center justify-center transition shadow-md text-sm"> 
-                                            배송출발 
-                                        </button> 
-                                        <button onclick="window.handlePopupSequenceChange('${(group.ids && Array.isArray(group.ids) ? group.ids : []).join(',')}')" class="flex-1 bg-[#5bc0de] hover:bg-[#31b0d5] text-white font-bold py-2.5 rounded-xl flex items-center justify-center transition shadow-md text-sm"> 
-                                            순서변경 
-                                        </button> 
-                                        <button onclick="window.closeKakaoPopup()" class="flex-1 bg-[#e2e8f0] hover:bg-[#cbd5e1] text-[#475569] font-bold py-2.5 rounded-xl flex items-center justify-center transition shadow-md text-sm"> 
-                                            닫기 
-                                        </button> 
-                                    </div> 
-                                </div> 
-                            </div> 
+                        popupHtml = `
+                            <div style="width:210px;background:white;border-radius:10px;box-shadow:0 3px 10px rgba(0,0,0,0.15);border:1px solid #e5e7eb;padding:10px;margin-bottom:44px;">
+                                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                                    <span style="background:#d9534f;color:white;font-size:11px;font-weight:800;padding:2px 7px;border-radius:20px;">${seqNum}번</span>
+                                    <span style="font-size:12px;font-weight:700;color:#1f2937;">${group.phone || ''}</span>
+                                </div>
+                                <div style="font-size:11px;color:#374151;margin-bottom:8px;line-height:1.4;">📍 ${(group.address || '주소 없음').substring(0,28)}${(group.address||'').length>28?'…':''}</div>
+                                <div style="display:flex;gap:4px;">
+                                    <button onclick="window.handleAppNavigation(${group.lat},${group.lng},'${(group.address||'').replace(/'/g,"\'")}')" style="flex:1;background:#d9534f;color:white;font-size:11px;font-weight:700;padding:5px 0;border:none;border-radius:6px;cursor:pointer;">배송출발</button>
+                                    <button onclick="window.handlePopupSequenceChange('${(group.ids&&Array.isArray(group.ids)?group.ids:[]).join(',')}')" style="flex:1;background:#5bc0de;color:white;font-size:11px;font-weight:700;padding:5px 0;border:none;border-radius:6px;cursor:pointer;">순서변경</button>
+                                    <button onclick="window.closeKakaoPopup()" style="flex:1;background:#e2e8f0;color:#475569;font-size:11px;font-weight:700;padding:5px 0;border:none;border-radius:6px;cursor:pointer;">닫기</button>
+                                </div>
+                            </div>
                         `; 
                     } 
  
@@ -1106,10 +1092,29 @@
                     polylineRef.current.setMap(map); 
                 } 
  
-                // 6. 모든 마커가 화면에 들어오도록 자동 줌 조절
-                if (hasValidPoints) { 
-                    // 약간의 여백(padding)을 주어 마커가 화면 끝에 걸치지 않도록 설정
-                    map.setBounds(bounds, 50, 50, 50, 50); 
+                // 6. 지도 중심/줌 설정 - 배송지 기준 (출발지가 멀어도 배송지 중심)
+                if (hasValidPoints) {
+                    const deliveryOnly = locations.filter(l => !l.type && l.lat && l.lng && !isNaN(l.lat));
+                    const firstDelivery = deliveryOnly.find(l => l.sequence_number === 1);
+
+                    if (deliveryOnly.length >= 2) {
+                        // 배송지만으로 bounds 계산
+                        const deliveryBounds = new window.kakao.maps.LatLngBounds();
+                        deliveryOnly.forEach(l => deliveryBounds.extend(new window.kakao.maps.LatLng(l.lat, l.lng)));
+                        map.setBounds(deliveryBounds, 60, 60, 60, 60);
+
+                        // 1번 마커가 있으면 중심으로 이동
+                        if (firstDelivery) {
+                            setTimeout(() => {
+                                map.setCenter(new window.kakao.maps.LatLng(firstDelivery.lat, firstDelivery.lng));
+                            }, 150);
+                        }
+                    } else if (deliveryOnly.length === 1) {
+                        map.setCenter(new window.kakao.maps.LatLng(deliveryOnly[0].lat, deliveryOnly[0].lng));
+                        map.setLevel(4);
+                    } else {
+                        map.setBounds(bounds, 50, 50, 50, 50);
+                    }
                 }
  
             }, [locationsStr, startStr, centerStr, mapLoaded]); 
@@ -2225,24 +2230,23 @@
                     }
 
                     // 4. Load Settings (Start/End Points)
-                    // Start Point - 각 사용자가 직접 설정 (하드코딩 없음)
+                    // Start Point - 저장된 값 불러오기 (절대 삭제 안 함)
                     let start = StorageManager.get('mvp_start_point');
-                    // 저장된 출발지가 없거나 주소가 비어있으면 null (사용자가 직접 설정해야 함)
-                    if (!start || !start.address) {
-                        start = null;
-                        StorageManager.remove('mvp_start_point');
-                    } else if (!start.lat || !start.lng || isNaN(start.lat) || isNaN(start.lng)) {
-                        // 주소는 있는데 좌표가 없으면 지오코딩으로 자동 보정
-                        geocodeAddress(start.address, false).then(coords => {
-                            if (coords) {
-                                const corrected = { ...start, lat: coords.lat, lng: coords.lng };
-                                setStartPoint(corrected);
-                                StorageManager.set('mvp_start_point', corrected);
-                                console.log('[StartPoint] 좌표 자동 보정:', corrected);
-                            }
-                        });
+                    if (start && start.address) {
+                        if (!start.lat || !start.lng || isNaN(Number(start.lat)) || isNaN(Number(start.lng))) {
+                            // 좌표 없으면 지오코딩으로 보정 (삭제 안 함)
+                            geocodeAddress(start.address, false).then(coords => {
+                                if (coords) {
+                                    const corrected = { ...start, lat: coords.lat, lng: coords.lng };
+                                    setStartPoint(corrected);
+                                    StorageManager.set('mvp_start_point', corrected);
+                                }
+                            });
+                        }
+                        setStartPoint(start);
+                    } else {
+                        setStartPoint(null);
                     }
-                    setStartPoint(start);
 
                     // End Point
                     const sessionDriver = localStorage.getItem('delivery_app_session_driver');
@@ -2719,24 +2723,23 @@
                             }
                         }
 
-                        // 2. Load Start Point & End Point (통합 객체 지원 - 최우선)
+                        // 2. Load Start Point & End Point
                         const unifiedData = StorageManager.get('deliveryData');
-                        
+
                         let start = null;
                         let end = null;
 
-                        if (unifiedData) {
-                            if (unifiedData.start_location) start = unifiedData.start_location;
-                            if (unifiedData.destination) end = unifiedData.destination;
+                        // [Fix] 출발지는 항상 mvp_start_point 우선 (관리자 설정값 보존)
+                        // unifiedData.start_location은 배송데이터에 묶인 과거값이라 덮어쓰지 않음
+                        const startStr = localStorage.getItem('mvp_start_point');
+                        if (startStr && startStr !== "undefined") {
+                            try { start = JSON.parse(startStr); } catch(e) {}
+                        }
+                        if (!start && unifiedData && unifiedData.start_location) {
+                            start = unifiedData.start_location;
                         }
 
-                        // 통합 데이터에 없으면 개별 키(하위 호환성) 확인
-                        if (!start) {
-                            const startStr = localStorage.getItem(Config.STORAGE_KEYS.START_LOCATION) || localStorage.getItem('mvp_start_point');
-                            if (startStr && startStr !== "undefined") {
-                                try { start = JSON.parse(startStr); } catch(e) {}
-                            }
-                        }
+                        if (unifiedData && unifiedData.destination) end = unifiedData.destination;
                         
                         const sessionDriver = localStorage.getItem('delivery_app_session_driver');
                         const endKey = sessionDriver ? `mvp_end_point_${sessionDriver}` : 'mvp_end_point';
