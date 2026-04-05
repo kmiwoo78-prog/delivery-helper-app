@@ -500,11 +500,16 @@
             // 데이터별 편의 메서드
             saveDeliveries: async (data) => {
                 try {
-                    // [Requirement] Data must always be Supabase
-                    // 1. Local Backup (Immediate UI consistency)
+                    // [Fix] 출발지는 항상 mvp_start_point 우선으로 읽기
                     const currentData = StorageManager.get('deliveryData') || {};
-                    const currentStart = StorageManager.get(Config.STORAGE_KEYS.START_LOCATION) || currentData.start_location;
-                    const currentEnd = StorageManager.get(Config.STORAGE_KEYS.END_LOCATION) || currentData.destination;
+                    const currentStart = StorageManager.get('mvp_start_point') 
+                        || StorageManager.get(Config.STORAGE_KEYS.START_LOCATION) 
+                        || currentData.start_location;
+                    const sessionDriver = localStorage.getItem('delivery_app_session_driver');
+                    const endKey = sessionDriver ? `mvp_end_point_${sessionDriver}` : 'mvp_end_point';
+                    const currentEnd = StorageManager.get(endKey)
+                        || StorageManager.get(Config.STORAGE_KEYS.END_LOCATION) 
+                        || currentData.destination;
                     StorageManager.saveAllData(data, currentStart, currentEnd);
                     
                     // 2. Cloud Sync (Critical)
@@ -621,18 +626,29 @@
                     .upsert({ id: 'notice', data: { text }, updated_at: new Date().toISOString() });
                 if (error) console.error("Notice sync failed", error);
             },
-            // 전체 데이터 다운로드
+            // 전체 데이터 다운로드 (타임아웃 + 재시도)
             async pull() {
                 if (!CloudManager.client) throw new Error("서버가 연결되지 않았습니다.");
-                
-                const { data, error } = await CloudManager.client
+
+                const fetchOnce = () => CloudManager.client
                     .from('delivery_sync')
                     .select('*')
                     .eq('id', 'master')
-                    .maybeSingle(); 
-                
-                if (error) throw error;
-                return data ? data.data : null;
+                    .maybeSingle();
+
+                // 8초 타임아웃으로 최대 2번 시도
+                for (let attempt = 0; attempt < 2; attempt++) {
+                    try {
+                        const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
+                        const { data, error } = await Promise.race([fetchOnce(), timeout]);
+                        if (error) throw error;
+                        return data ? data.data : null;
+                    } catch(e) {
+                        if (attempt === 1) throw e;
+                        console.warn('[Cloud] Pull timeout, retrying...');
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+                }
             },
             // 공지사항 다운로드
             async pullNotice() {
@@ -692,61 +708,70 @@
                     return resolve(strict ? null : getRegionalFallback(address));
                 }
 
-                // [핵심 로직 개선] 주소 정제 - 한국 아파트 주소 형식 대응
-                // 예: "인천 남동구 소래역로 94 논현단풍마을트리플에듀 1101동203호"
-                // 1단계: 건물명까지 포함해서 검색 (동호수만 제거)
-                // 2단계 실패시: 도로명+번지만으로 재시도
-                let cleanAddress = address;
-                if (address) {
-                    const parts = address.split(/\s+/);
-                    const filteredParts = [];
-
+                // [주소 정제] 3단계 전략
+                // 1단계: 동호수/층/괄호 제거 후 검색 (건물명 포함)
+                // 2단계: 도로명+번지만으로 재시도
+                // 3단계: 시/구/도로명만으로 최후 시도
+                const cleanAddr1 = (() => {
+                    const raw = address.replace(/\(.*?\)/g, '').trim(); // 괄호 안 지번 먼저 제거
+                    const parts = raw.split(/\s+/);
+                    const out = [];
                     for (let i = 0; i < parts.length; i++) {
-                        const part = parts[i];
-                        const prevPart = i > 0 ? parts[i-1] : '';
-                        const isAfterRoad = prevPart.endsWith('로') || prevPart.endsWith('길') || /[로길]\d*번길$/.test(prevPart);
-
-                        // "1101동203호" 처럼 동호수가 붙어있는 경우 → 자름
-                        if (/^\d+동\d+호$/.test(part)) { break; }
-                        // "710동" 처럼 동만 있는 경우 (도로명 뒤 건물번호는 제외) → 자름
-                        if (/^\d+동$/.test(part) && !isAfterRoad) { break; }
-                        // "1402호", "203호" 처럼 호수/층수만 있는 경우 → 자름
-                        if (/^\d+호$/.test(part) || /^\d+층$/.test(part)) { break; }
-                        // "안쪽", "우측" 등 불필요한 설명어 → 자름
-                        if (['안쪽', '우측', '좌측', '내부', '앞', '뒤', '옆'].includes(part)) { break; }
-
-                        filteredParts.push(part);
+                        const p = parts[i];
+                        const prev = i > 0 ? parts[i-1] : '';
+                        const afterRoad = prev.endsWith('로') || prev.endsWith('길') || /[로길]\d*번길$/.test(prev);
+                        if (/^\d+동\d+호$/.test(p)) break;           // 1101동203호
+                        if (/^\d+동$/.test(p) && !afterRoad) break;   // 710동 (아파트 동)
+                        if (/^\d+호$/.test(p)) break;                  // 402호
+                        if (/^\d+층$/.test(p)) break;                  // 2층
+                        if (/^\d{1,4}[층호]$/.test(p)) break;          // 2층, 202호 등
+                        if (['안쪽','우측','좌측','내부','앞','뒤','옆'].includes(p)) break;
+                        out.push(p);
                     }
-                    cleanAddress = filteredParts.join(' ').trim();
-                }
+                    return out.join(' ').trim();
+                })();
 
-                const geocoder = new window.kakao.maps.services.Geocoder(); 
-                
-                geocoder.addressSearch(cleanAddress, (result, status) => { 
-                    if (status === window.kakao.maps.services.Status.OK) { 
-                        resolve({ lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) }); 
+                // 2단계: 도로명+번지 (건물명 제거)
+                const cleanAddr2 = (() => {
+                    const parts = cleanAddr1.split(' ');
+                    let roadIdx = -1;
+                    parts.forEach((p, i) => {
+                        if (p.endsWith('로') || p.endsWith('길') || /[로길]\d*번길$/.test(p)) roadIdx = i;
+                    });
+                    return roadIdx >= 0 ? parts.slice(0, roadIdx + 2).join(' ') : parts.slice(0, 4).join(' ');
+                })();
+
+                // 3단계: 구 + 도로명만 (번지도 제거)
+                const cleanAddr3 = (() => {
+                    const parts = cleanAddr1.split(' ');
+                    let roadIdx = -1;
+                    parts.forEach((p, i) => {
+                        if (p.endsWith('로') || p.endsWith('길') || /[로길]\d*번길$/.test(p)) roadIdx = i;
+                    });
+                    return roadIdx >= 0 ? parts.slice(0, roadIdx + 1).join(' ') : parts.slice(0, 3).join(' ');
+                })();
+
+                const geocoder = new window.kakao.maps.services.Geocoder();
+
+                geocoder.addressSearch(cleanAddr1, (r1, s1) => {
+                    if (s1 === window.kakao.maps.services.Status.OK) {
+                        resolve({ lat: parseFloat(r1[0].y), lng: parseFloat(r1[0].x) });
                     } else {
-                        // 2단계: 건물명 제거하고 도로명+번지만으로 재시도
-                        const parts2 = cleanAddress.split(' ');
-                        let roadEndIdx = -1;
-                        for (let i = 0; i < parts2.length; i++) {
-                            if (parts2[i].endsWith('로') || parts2[i].endsWith('길') || /[로길]\d*번길$/.test(parts2[i])) {
-                                roadEndIdx = i;
-                            }
-                        }
-                        const fallbackAddress = roadEndIdx >= 0
-                            ? parts2.slice(0, roadEndIdx + 2).join(' ')
-                            : parts2.slice(0, 4).join(' ');
-
-                        geocoder.addressSearch(fallbackAddress, (fbResult, fbStatus) => {
-                            if (fbStatus === window.kakao.maps.services.Status.OK) {
-                                resolve({ lat: parseFloat(fbResult[0].y), lng: parseFloat(fbResult[0].x) });
+                        geocoder.addressSearch(cleanAddr2, (r2, s2) => {
+                            if (s2 === window.kakao.maps.services.Status.OK) {
+                                resolve({ lat: parseFloat(r2[0].y), lng: parseFloat(r2[0].x) });
                             } else {
-                                console.error(`[Geocoding Error] 주소 변환 실패\n원본: ${address}\n정제: ${cleanAddress}\n2단계: ${fallbackAddress}`);
-                                resolve(strict ? null : getRegionalFallback(address));
+                                geocoder.addressSearch(cleanAddr3, (r3, s3) => {
+                                    if (s3 === window.kakao.maps.services.Status.OK) {
+                                        resolve({ lat: parseFloat(r3[0].y), lng: parseFloat(r3[0].x) });
+                                    } else {
+                                        console.error(`[Geocoding 실패] ${address} → ${cleanAddr1} → ${cleanAddr2} → ${cleanAddr3}`);
+                                        resolve(strict ? null : getRegionalFallback(address));
+                                    }
+                                });
                             }
                         });
-                    } 
+                    }
                 }); 
             }); 
         }
@@ -4122,60 +4147,72 @@
                 });
                 if (pending.length === 0) return;
                 
+                // 지역별 fallback 좌표 계산 함수
+                const getFallbackCoord = (addr) => {
+                    let lat = 37.5665, lng = 126.9780;
+                    if (addr.includes('인천')) { lat = 37.4563; lng = 126.7052; }
+                    else if (addr.includes('김포')) { lat = 37.6153; lng = 126.7150; }
+                    else if (addr.includes('부천')) { lat = 37.5034; lng = 126.7660; }
+                    else if (addr.includes('고양') || addr.includes('일산')) { lat = 37.6584; lng = 126.8320; }
+                    else if (addr.includes('파주')) { lat = 37.7600; lng = 126.7800; }
+                    else if (addr.includes('시흥')) { lat = 37.3800; lng = 126.8000; }
+                    else if (addr.includes('광명')) { lat = 37.4785; lng = 126.8646; }
+                    else if (addr.includes('안산')) { lat = 37.3219; lng = 126.8308; }
+                    else if (addr.includes('안양')) { lat = 37.3943; lng = 126.9568; }
+                    else if (addr.includes('수원')) { lat = 37.2636; lng = 127.0286; }
+                    else if (addr.includes('성남') || addr.includes('분당')) { lat = 37.4200; lng = 127.1265; }
+                    else if (addr.includes('용인')) { lat = 37.2410; lng = 127.1775; }
+                    else if (addr.includes('화성')) { lat = 37.1995; lng = 126.8315; }
+                    const s = String(addr);
+                    let h = 0; for (let j = 0; j < s.length; j++) { h = ((h * 31) + s.charCodeAt(j)) >>> 0; }
+                    lat += ((h % 21) - 10) * 0.005;
+                    lng += ((((h >> 5) % 21) - 10) * 0.005);
+                    return { lat, lng };
+                };
+
                 let i = 0;
+                const geocodeResults = {};
                 const workers = Math.min(4, Math.max(1, pending.length));
                 const run = async () => {
                     while (i < pending.length) {
                         const idx = i++;
                         const d = pending[idx];
-                        const addr = d.address || '';  // [Fix] formatAddressDisplay 대신 원본 주소 직접 사용
+                        const addr = d.address || '';
                         let c = await geocodeAddress(addr, true);
                         if (!c) c = await geocodeAddress(addr, false);
-                        
+
+                        geocodeResults[d.id] = c ? { lat: c.lat, lng: c.lng } : getFallbackCoord(d.address || '');
+
+                        // UI 즉시 반영 (로컬 저장만, 클라우드는 전체 완료 후)
                         setDeliveries(prev => {
                             const next = prev.map(x => {
                                 if (x.id === d.id) {
-                                    // 좌표 변환 실패 시: 지역구 기반 대략적 좌표 할당 (서울 쏠림 방지)
-                                    let fallbackLat = 37.5665;
-                                    let fallbackLng = 126.9780;
-                                    
-                                    if (!c && d.address) {
-                                        if (d.address.includes('인천')) { fallbackLat = 37.4563; fallbackLng = 126.7052; }
-                                        else if (d.address.includes('김포')) { fallbackLat = 37.6153; fallbackLng = 126.7150; }
-                                        else if (d.address.includes('부천')) { fallbackLat = 37.5034; fallbackLng = 126.7660; }
-                                        else if (d.address.includes('고양') || d.address.includes('일산')) { fallbackLat = 37.6584; fallbackLng = 126.8320; }
-                                        else if (d.address.includes('파주')) { fallbackLat = 37.7600; fallbackLng = 126.7800; }
-                                        else if (d.address.includes('시흥')) { fallbackLat = 37.3800; fallbackLng = 126.8000; }
-                                        else if (d.address.includes('광명')) { fallbackLat = 37.4785; fallbackLng = 126.8646; }
-                                        else if (d.address.includes('안산')) { fallbackLat = 37.3219; fallbackLng = 126.8308; }
-                                        else if (d.address.includes('안양')) { fallbackLat = 37.3943; fallbackLng = 126.9568; }
-                                        else if (d.address.includes('수원')) { fallbackLat = 37.2636; fallbackLng = 127.0286; }
-                                        else if (d.address.includes('성남') || d.address.includes('분당')) { fallbackLat = 37.4200; fallbackLng = 127.1265; }
-                                        else if (d.address.includes('용인')) { fallbackLat = 37.2410; fallbackLng = 127.1775; }
-                                        else if (d.address.includes('화성')) { fallbackLat = 37.1995; fallbackLng = 126.8315; }
-                                        
-                                        // 주소 해시값을 이용해 약간의 랜덤 오프셋을 줘서 마커가 완벽히 겹치는 것 방지
-                                        const s = String(d.address); 
-                                        let h = 0; for (let i = 0; i < s.length; i++) { h = ((h * 31) + s.charCodeAt(i)) >>> 0; } 
-                                        fallbackLat += ((h % 21) - 10) * 0.005; // 오차 범위 확대
-                                        fallbackLng += ((((h >> 5) % 21) - 10) * 0.005);
-                                    }
-
-                                    return { 
-                                        ...x, 
-                                        lat: c ? c.lat : fallbackLat,
-                                        lng: c ? c.lng : fallbackLng, 
-                                        geocode_pending: false 
-                                    };
+                                    const coord = geocodeResults[d.id];
+                                    return { ...x, lat: coord.lat, lng: coord.lng, geocode_pending: false };
                                 }
                                 return x;
                             });
-                            StorageManager.saveDeliveries(next);
+                            // 로컬에만 저장 (saveDeliveries 대신 직접 localStorage)
+                            try { localStorage.setItem('mvp_deliveries', JSON.stringify(next)); } catch(e) {}
                             return next;
                         });
                     }
                 };
+
                 await Promise.all(Array.from({ length: workers }).map(() => run()));
+
+                // [Fix] 지오코딩 전체 완료 후 Supabase에 한 번만 업로드
+                setDeliveries(prev => {
+                    const final = prev.map(x => {
+                        if (geocodeResults[x.id]) {
+                            return { ...x, ...geocodeResults[x.id], geocode_pending: false };
+                        }
+                        return x;
+                    });
+                    StorageManager.saveDeliveries(final); // 이 시점에 클라우드 동기화
+                    console.log('[Geocode] 완료 - Supabase 동기화');
+                    return final;
+                });
             }
 
             // [기능] GPS로 출발지 설정
