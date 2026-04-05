@@ -1340,7 +1340,7 @@
                         }
                     } catch (e) {}
                 };
-                t = setInterval(poll, 15000);
+                t = setInterval(poll, 60000); // [Fix] 15초→60초
                 return () => { if (t) clearInterval(t); };
             }, []);
 
@@ -2619,7 +2619,7 @@
                             .subscribe();
                             
                         // [안전망] Realtime 유실 대비 15초마다 강제 동기화
-                        pollTimer = setInterval(fetchLatest, 15000);
+                        pollTimer = setInterval(fetchLatest, 60000); // [Fix] 15초→60초: Supabase 부하 감소
                     }
                 };
 
@@ -5250,15 +5250,7 @@ ${logContent}
                                                      </button>
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-3">
-                                                    <button onClick={() => handleCloudSync('push')} className="bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 transition text-sm shadow-md flex flex-col items-center justify-center gap-1">
-                                                        <span className="text-lg">☁️⬆️</span>
-                                                        <span>서버에 올리기</span>
-                                                    </button>
-                                                    <button onClick={() => handleCloudSync('pull')} className="bg-white text-indigo-900 py-3 rounded-lg font-bold hover:bg-indigo-50 transition text-sm border border-indigo-200 flex flex-col items-center justify-center gap-1">
-                                                        <span className="text-lg">☁️⬇️</span>
-                                                        <span>서버에서 받기</span>
-                                                    </button>
-                                                    
+                                                    {/* 파일저장 */}
                                                     <button onClick={() => {
                                                         const blob = new Blob([JSON.stringify(deliveries)], {type: "application/json"});
                                                         const url = URL.createObjectURL(blob);
@@ -5270,7 +5262,8 @@ ${logContent}
                                                         <span className="text-lg">💾</span>
                                                         <span>파일저장</span>
                                                     </button>
-                                                    
+
+                                                    {/* 파일불러오기 */}
                                                     <label className="bg-slate-50 text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-xs border border-slate-200 flex flex-col items-center justify-center gap-1 cursor-pointer">
                                                         <span className="text-lg">📂</span>
                                                         <span>파일불러오기</span>
@@ -5291,61 +5284,12 @@ ${logContent}
                                                         }} />
                                                     </label>
 
-                                                    <button onClick={handleVerifyData} className="bg-sky-50 text-indigo-900 py-3 rounded-lg font-bold hover:bg-indigo-100 transition text-sm border border-sky-100">
-                                                        📊 데이터 검증
-                                                    </button>
-                                                    <button onClick={fixCoordinates} className="bg-red-50 text-red-600 py-3 rounded-lg font-bold hover:bg-red-100 transition text-sm border border-red-100">
+                                                    {/* 좌표 보정 */}
+                                                    <button onClick={fixCoordinates} className="col-span-2 bg-red-50 text-red-600 py-3 rounded-lg font-bold hover:bg-red-100 transition text-sm border border-red-100">
                                                         🛠 좌표 보정
                                                     </button>
-                                                    <button onClick={async () => {
-                                                        setLoading(true);
-                                                        const removed = await StorageManager.cleanupEphemeral();
-                                                        setLoading(false);
-                                                        alert(`저장소 정리를 완료했습니다.\n정리 항목: ${removed}개\n(검증 리포트/브라우저 캐시 등)\n※ 자동 백업은 유지됩니다.`);
-                                                    }} className="bg-indigo-50 text-indigo-900 py-3 rounded-lg font-bold hover:bg-indigo-100 transition text-sm border border-indigo-200">
-                                                        🧹 저장소 정리
-                                                    </button>
-                                                    <button onClick={async () => {
-                                                        await StorageManager.ensurePersistent();
-                                                    }} className="bg-slate-50 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-sm border border-slate-200">
-                                                        🔒 영구 저장 요청
-                                                    </button>
-                                                    <button onClick={async () => {
-                                                        await StorageManager.showEstimate();
-                                                    }} className="bg-slate-50 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-sm border border-slate-200">
-                                                        💾 사용량 확인
-                                                    </button>
-                                                    <button onClick={() => {
-                                                        const settings = StorageManager.get(Config.STORAGE_KEYS.SETTINGS) || {};
-                                                        const daysStr = prompt('클라우드에 유지할 최근 일수 입력 (예: 60):', String(settings.cloud_compact_days || 60));
-                                                        if (!daysStr) return;
-                                                        const days = parseInt(daysStr, 10);
-                                                        if (isNaN(days) || days <= 0) {
-                                                            alert('유효한 숫자를 입력하세요.');
-                                                            return;
-                                                        }
-                                                        const enable = confirm(`클라우드 데이터를 최근 ${days}일만 유지하도록 경량화합니다.\n서버의 이전 데이터는 덮어씌워질 수 있습니다. 진행하시겠습니까?`);
-                                                        if (!enable) return;
-                                                        const next = { ...(settings || {}), cloud_compact_enabled: true, cloud_compact_days: days };
-                                                        StorageManager.set(Config.STORAGE_KEYS.SETTINGS, next);
-                                                        alert('클라우드 경량화 설정이 적용되었습니다. 다음 저장부터 반영됩니다.');
-                                                    }} className="bg-amber-50 text-amber-800 py-3 rounded-lg font-bold hover:bg-amber-100 transition text-sm border border-amber-200">
-                                                        ☁️ 클라우드 경량화 설정
-                                                    </button>
-                                                    <button onClick={() => {
-                                                        const settings = StorageManager.get(Config.STORAGE_KEYS.SETTINGS) || {};
-                                                        const daysStr = prompt('아카이브로 내보낼 기준: 최근 일수 (예: 60). 입력한 일수보다 오래된 데이터를 내보냅니다.', String(settings.cloud_compact_days || 60));
-                                                        if (!daysStr) return;
-                                                        const days = parseInt(daysStr, 10);
-                                                        if (isNaN(days) || days <= 0) {
-                                                            alert('유효한 숫자를 입력하세요.');
-                                                            return;
-                                                        }
-                                                        StorageManager.exportArchive(deliveries, days);
-                                                    }} className="bg-slate-50 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-sm border border-slate-200">
-                                                        📦 아카이브 내보내기
-                                                    </button>
-                                                     
+
+                                                    {/* 자동 백업 복구 */}
                                                     <button onClick={() => {
                                                         const backupList = StorageManager.get('mvp_backup_list') || [];
                                                         if(backupList.length === 0) {
@@ -5355,7 +5299,6 @@ ${logContent}
                                                         const msg = backupList.map((b, i) => `${i+1}. ${b.time} (${b.count}건)`).join('\n');
                                                         const choice = prompt(`[자동 백업 복구]\n복구할 백업 번호를 입력하세요:\n\n${msg}`);
                                                         if (!choice) return;
-                                                        
                                                         const idx = parseInt(choice) - 1;
                                                         if(idx >= 0 && idx < backupList.length) {
                                                             const backupKey = backupList[idx].key;
@@ -5375,6 +5318,8 @@ ${logContent}
                                                     }} className="col-span-2 bg-orange-50 text-orange-800 py-3 rounded-lg font-bold hover:bg-orange-100 transition text-sm border border-orange-200 shadow-sm flex items-center justify-center gap-2">
                                                         <span>↺</span> 자동 백업 복구
                                                     </button>
+
+                                                    {/* 전체 데이터 초기화 */}
                                                     <button onClick={() => {
                                                         if (!confirm('배송 목록, 출발지, 도착지 등 모든 데이터가 삭제됩니다. 진행하시겠습니까?')) return;
                                                         StorageManager.clearAll();
@@ -6127,62 +6072,15 @@ ${logContent}
                                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-6">
                                     <div className="flex items-center justify-between mb-3">
                                         <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                                            🔄 데이터 동기화
+                                            🗑️ 데이터 관리
                                         </h3>
-                                        <button onClick={() => setCloudModalOpen(true)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition flex items-center gap-1 ${isCloudConnected ? 'bg-white text-slate-500 border-slate-200' : 'bg-indigo-600 text-white border-indigo-600 shadow-md animate-pulse'}`}>
-                                            {isCloudConnected ? "⚙️ 서버 설정" : "☁️ 서버 연결하기"}
-                                        </button>
                                     </div>
                                     <div className="grid grid-cols-2 gap-3">
-                                        {/* Cloud Buttons - Always Visible */}
-                                        <button onClick={() => handleCloudSync('pull')} className="col-span-2 bg-indigo-600 text-white py-4 rounded-lg font-bold hover:bg-indigo-700 transition text-sm shadow-lg shadow-indigo-200 flex items-center justify-center gap-2">
-                                            <span className="text-xl">☁️</span>
-                                            <span>서버에서 목록 불러오기</span>
-                                        </button>
-                                        <button onClick={() => handleCloudSync('push')} className="col-span-2 bg-white text-indigo-900 py-3 rounded-lg font-bold hover:bg-sky-50 transition text-sm border border-indigo-200 flex items-center justify-center gap-2 mb-2">
-                                            <span className="text-xl">☁️</span>
-                                            <span>작업 결과 서버에 저장</span>
-                                        </button>
-
                                         <button onClick={showDeleteRangePrompt} className="col-span-2 bg-red-50 text-red-700 py-3 rounded-lg font-bold hover:bg-red-100 transition text-sm border border-red-200 flex items-center justify-center gap-2">
                                             <span className="text-xl">🗑️</span>
                                             <span>데이터 삭제</span>
                                         </button>
-
-                                        <button onClick={() => {
-                                            const blob = new Blob([JSON.stringify(deliveries)], {type: "application/json"});
-                                            const url = URL.createObjectURL(blob);
-                                            const a = document.createElement('a');
-                                            a.href = url;
-                                            a.download = `driver_data_${new Date().toISOString().slice(0,10)}.json`;
-                                            a.click();
-                                        }} className="bg-white text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-50 transition text-sm border border-slate-200 shadow-sm flex flex-col items-center justify-center gap-1">
-                                            <span className="text-xl">📤</span>
-                                            <span>파일로 저장</span>
-                                        </button>
-                                        <label className="bg-white text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-50 transition text-sm border border-slate-200 shadow-sm flex flex-col items-center justify-center gap-1 cursor-pointer">
-                                            <span className="text-xl">📥</span>
-                                            <span>파일 불러오기</span>
-                                            <input type="file" hidden accept=".json" onChange={(e) => {
-                                                const file = e.target.files[0];
-                                                if(!file) return;
-                                                readJsonFileWithEncoding(file, (data) => {
-                                                    if(Array.isArray(data)) {
-                                                        if(confirm(`총 ${data.length}건의 데이터를 불러오시겠습니까? 현재 데이터는 덮어씌워집니다.`)) {
-                                                            setDeliveries(data);
-                                                            StorageManager.saveDeliveries(data);
-                                                            alert("데이터가 업데이트되었습니다.");
-                                                        }
-                                                    } else {
-                                                        alert("올바르지 않은 데이터 형식입니다.");
-                                                    }
-                                                });
-                                            }} />
-                                        </label>
                                     </div>
-                                    <p className="text-xs text-slate-400 mt-2 text-center">
-                                        * 관리자가 보낸 파일을 '불러오기' 하고, 작업 후 '저장'하여 관리자에게 보내세요.
-                                    </p>
                                 </div>
                                 
                                 {/* Undo Button (Floating) */}
