@@ -2549,7 +2549,18 @@
                     });
                     if (pending.length > 0) {
                         console.log(`[AutoGeocode] Found ${pending.length} missing coords. Running background geocode...`);
-                        backgroundGeocode(deliveries);
+                        // [Fix] 카카오맵 로드 완료 후 실행
+                        const tryGeocode = (attempt = 0) => {
+                            if (window.kakao && window.kakao.maps && window.kakao.maps.services) {
+                                backgroundGeocode(deliveries);
+                            } else if (attempt < 20) {
+                                console.log(`[AutoGeocode] 카카오맵 대기 중... (${attempt+1})`);
+                                setTimeout(() => tryGeocode(attempt + 1), 500);
+                            } else {
+                                console.error('[AutoGeocode] 카카오맵 로드 실패');
+                            }
+                        };
+                        tryGeocode();
                     }
                 }
             }, [deliveries]);
@@ -4094,10 +4105,18 @@
 
                         alert(`엑셀 업로드 완료! (신규 ${newCount}건, 업데이트 ${updateCount}건)${dateMsg}\n\n데이터 처리는 백그라운드에서 진행됩니다.`);
                         
-                        // [비동기 처리] 업로드 완료 팝업 띄운 후 지오코딩 진행
-                        setTimeout(() => {
-                            backgroundGeocode(updated);
-                        }, 500);
+                        // [Fix] 카카오맵 로드 확인 후 지오코딩 실행
+                        const startGeocode = (data, attempt = 0) => {
+                            if (window.kakao && window.kakao.maps && window.kakao.maps.services) {
+                                backgroundGeocode(data);
+                            } else if (attempt < 20) {
+                                console.log(`[Geocode] 카카오맵 대기 중... (${attempt+1})`);
+                                setTimeout(() => startGeocode(data, attempt + 1), 500);
+                            } else {
+                                console.error('[Geocode] 카카오맵 로드 실패 - 지오코딩 포기');
+                            }
+                        };
+                        setTimeout(() => startGeocode(updated), 500);
 
                     } else {
                         alert("업로드된 데이터가 없습니다.");
@@ -4712,33 +4731,7 @@ ${logContent}
                     </div>
 
                     <main className="px-4 pb-32 max-w-7xl mx-auto pt-0">
-                        {/* 관리자 요약 및 광고 */}
-                        {view === 'admin' && ( 
-                           <div className="space-y-4 mb-6"> 
-                             <Card> 
-                               <div className="grid grid-cols-3 gap-4 text-center"> 
-                                 <div> 
-                                   <p className="text-xs text-slate-500">총 배송</p> 
-                                   <p className="text-2xl font-black text-slate-900"> 
-                                     {deliveries.length} 
-                                   </p> 
-                                 </div> 
-                                 <div> 
-                                   <p className="text-xs text-slate-500">완료</p> 
-                                   <p className="text-2xl font-black text-emerald-600"> 
-                                     {deliveries.filter(d => d.completed).length} 
-                                   </p> 
-                                 </div> 
-                                 <div> 
-                                  <p className="text-xs text-slate-500">대기</p> 
-                                   <p className="text-2xl font-black text-rose-600"> 
-                                     {deliveries.filter(d => !d.completed).length} 
-                                   </p> 
-                                 </div> 
-                               </div> 
-                             </Card> 
-                           </div> 
-                         )}
+
 
                         {/* 관리자 모드 */}
                         {view === 'admin' && (
@@ -4772,101 +4765,9 @@ ${logContent}
                                     </div>
                                 </div>
                                 
-                                {/* [New] 기사별 필터 (관리자 전용) */}
-                                <section className="col-span-12 space-y-6 mb-8">
-                                    <h2 className="text-lg font-black text-slate-900">
-                                        📊 운영 통계
-                                    </h2>
 
-                                    {/* [New] 오늘 배송 요약 */}
-                                    <Card>
-                                        <h3 className="font-bold text-slate-800 mb-3">
-                                            📅 오늘 배송 요약
-                                        </h3>
-                                        {(() => {
-                                            const todayStr = new Date().toISOString().split('T')[0];
-                                            const yesterday = new Date();
-                                            yesterday.setDate(yesterday.getDate() - 1);
-                                            const yesterdayStr = yesterday.toISOString().split('T')[0];
-                                            
-                                            const todayCompleted = deliveries.filter(d => d.date === todayStr && d.completed).length;
-                                            const yesterdayCompleted = deliveries.filter(d => d.date === yesterdayStr && d.completed).length;
-
-                                            return (
-                                                <div className="grid grid-cols-2 gap-4 text-center">
-                                                    <div className="bg-slate-50 rounded-xl py-4">
-                                                        <p className="text-xs text-slate-500">오늘 완료</p>
-                                                        <p className="text-2xl font-black text-indigo-600">
-                                                            {todayCompleted}
-                                                        </p>
-                                                    </div>
-
-                                                    <div className="bg-slate-50 rounded-xl py-4">
-                                                        <p className="text-xs text-slate-500">어제 완료</p>
-                                                        <p className="text-2xl font-black text-slate-400">
-                                                            {yesterdayCompleted}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()}
-                                    </Card>
-
-                                    {/* [New] 요일별 배송량 (바 차트) */}
-                                    <Card> 
-                                        <h3 className="font-bold text-slate-800 mb-3"> 
-                                            📈 요일별 배송량 
-                                        </h3> 
-                                        {(() => {
-                                            const days = ['일', '월', '화', '수', '목', '금', '토'];
-                                            const weeklyStats = days.map((day, index) => {
-                                                const count = deliveries.filter(d => {
-                                                    if (!d.date) return false;
-                                                    const parts = d.date.split('-');
-                                                    if (parts.length !== 3) return false;
-                                                    const date = new Date(parts[0], parts[1] - 1, parts[2]);
-                                                    return date.getDay() === index;
-                                                }).length;
-                                                return { name: day, count };
-                                            });
-                                            const max = Math.max(1, ...weeklyStats.map(w => w.count));
-
-                                            return (
-                                                <div className="h-24 flex items-end justify-between gap-2 px-1">
-                                                    {weeklyStats.map(w => (
-                                                        <div key={w.name} className="flex-1 flex flex-col items-center gap-1">
-                                                            <div 
-                                                                className="w-full rounded-sm shadow-sm"
-                                                                style={{ 
-                                                                    height: `${Math.max(6, Math.round((w.count / max) * 100))}%`,
-                                                                    backgroundColor: `rgba(239,68,68, ${Math.max(0.35, (w.count / max))})`
-                                                                }}
-                                                                title={`${w.name} ${w.count}건`}
-                                                            />
-                                                            <span className="text-[10px] text-slate-500">{w.name}</span>
-                                                            <span className="text-[10px] font-bold text-slate-700">{w.count}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            );
-                                        })()}
-                                    </Card>
-
-                                    {/* [New] 운영 인사이트 */}
-                                    <Card className="border-indigo-200 bg-indigo-50"> 
-                                       <h3 className="font-black text-indigo-900 mb-2"> 
-                                         💡 운영 인사이트 
-                                       </h3> 
-                                       <ul className="text-sm text-indigo-800 space-y-1"> 
-                                         <li>• 오전 10~12시 배송 완료율 최고</li> 
-                                         <li>• 월요일 배송량이 평균보다 23% 많음</li> 
-                                         <li>• 지도 사용률 높은 기사 = 클레임 낮음</li> 
-                                       </ul> 
-                                     </Card>
-                                    
-                                    {/* 기사별 필터 */}
-                                    
-
+                                {/* 정산 카드 */}
+                                <div className="col-span-12 space-y-4 mb-4">
                                     {/* 2. [Card] 금일 비용 집계 */}
                                     <Card 
                                         className=""
@@ -5067,13 +4968,9 @@ ${logContent}
                                         );
                                     })()}
                                 </Card>
+                                </div>
 
-                                    
-                                </section>
-
-                                
-
-                                {/* 수동 등록 폼 & 엑셀 업로드 & 검증 */}
+                                                                {/* 수동 등록 폼 & 엑셀 업로드 & 검증 */}
                                 <div className="col-span-12 grid grid-cols-12 gap-6">
                                     {!showManualRegister ? (
                                         <div className="col-span-12">
@@ -5250,7 +5147,15 @@ ${logContent}
                                                      </button>
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-3">
-                                                    {/* 파일저장 */}
+                                                    <button onClick={() => handleCloudSync('push')} className="bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 transition text-sm shadow-md flex flex-col items-center justify-center gap-1">
+                                                        <span className="text-lg">☁️⬆️</span>
+                                                        <span>서버에 올리기</span>
+                                                    </button>
+                                                    <button onClick={() => handleCloudSync('pull')} className="bg-white text-indigo-900 py-3 rounded-lg font-bold hover:bg-indigo-50 transition text-sm border border-indigo-200 flex flex-col items-center justify-center gap-1">
+                                                        <span className="text-lg">☁️⬇️</span>
+                                                        <span>서버에서 받기</span>
+                                                    </button>
+                                                    
                                                     <button onClick={() => {
                                                         const blob = new Blob([JSON.stringify(deliveries)], {type: "application/json"});
                                                         const url = URL.createObjectURL(blob);
@@ -5262,8 +5167,7 @@ ${logContent}
                                                         <span className="text-lg">💾</span>
                                                         <span>파일저장</span>
                                                     </button>
-
-                                                    {/* 파일불러오기 */}
+                                                    
                                                     <label className="bg-slate-50 text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-xs border border-slate-200 flex flex-col items-center justify-center gap-1 cursor-pointer">
                                                         <span className="text-lg">📂</span>
                                                         <span>파일불러오기</span>
@@ -5289,7 +5193,52 @@ ${logContent}
                                                         🛠 좌표 보정
                                                     </button>
 
-                                                    {/* 자동 백업 복구 */}
+                                                    {/* 날짜별 데이터 삭제 - 달력 선택 */}
+                                                    <div className="col-span-2 bg-orange-50 rounded-lg border border-orange-200 p-3">
+                                                        <p className="text-sm font-bold text-orange-700 mb-1">📅 날짜별 데이터 삭제</p>
+                                                        <p className="text-xs text-orange-400 mb-2">
+                                                            {[...new Set(deliveries.map(d => d.date).filter(Boolean))].sort().map(date => {
+                                                                const cnt = deliveries.filter(x => x.date === date).length;
+                                                                return `${date}(${cnt}건)`;
+                                                            }).join(' / ') || '저장된 날짜 없음'}
+                                                        </p>
+                                                        <div className="flex gap-2">
+                                                            <input
+                                                                type="date"
+                                                                id="adminDeleteDate"
+                                                                className="flex-1 border border-orange-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white"
+                                                            />
+                                                            <button onClick={async () => {
+                                                                const input = document.getElementById('adminDeleteDate');
+                                                                const targetDate = input ? input.value : '';
+                                                                if (!targetDate) { alert('날짜를 선택해주세요.'); return; }
+                                                                const cnt = deliveries.filter(d => d.date === targetDate).length;
+                                                                if (cnt === 0) { alert(`${targetDate} 날짜의 데이터가 없습니다.`); return; }
+                                                                if (!confirm(`${targetDate} 데이터 ${cnt}건을 삭제하시겠습니까?`)) return;
+                                                                const next = deliveries.filter(d => d.date !== targetDate);
+                                                                setDeliveries(next);
+                                                                await StorageManager.saveDeliveries(next);
+                                                                alert(`✅ ${targetDate} 데이터 ${cnt}건 삭제\n남은 데이터: ${next.length}건`);
+                                                                if (input) input.value = '';
+                                                            }} className="bg-orange-500 text-white px-3 py-2 rounded-lg font-bold text-sm hover:bg-orange-600 transition whitespace-nowrap">
+                                                                삭제
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <button onClick={() => {
+                                                        const settings = StorageManager.get(Config.STORAGE_KEYS.SETTINGS) || {};
+                                                        const daysStr = prompt('아카이브로 내보낼 기준: 최근 일수 (예: 60). 입력한 일수보다 오래된 데이터를 내보냅니다.', String(settings.cloud_compact_days || 60));
+                                                        if (!daysStr) return;
+                                                        const days = parseInt(daysStr, 10);
+                                                        if (isNaN(days) || days <= 0) {
+                                                            alert('유효한 숫자를 입력하세요.');
+                                                            return;
+                                                        }
+                                                        StorageManager.exportArchive(deliveries, days);
+                                                    }} className="bg-slate-50 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-100 transition text-sm border border-slate-200">
+                                                        📦 아카이브 내보내기
+                                                    </button>
+                                                     
                                                     <button onClick={() => {
                                                         const backupList = StorageManager.get('mvp_backup_list') || [];
                                                         if(backupList.length === 0) {
@@ -5299,6 +5248,7 @@ ${logContent}
                                                         const msg = backupList.map((b, i) => `${i+1}. ${b.time} (${b.count}건)`).join('\n');
                                                         const choice = prompt(`[자동 백업 복구]\n복구할 백업 번호를 입력하세요:\n\n${msg}`);
                                                         if (!choice) return;
+                                                        
                                                         const idx = parseInt(choice) - 1;
                                                         if(idx >= 0 && idx < backupList.length) {
                                                             const backupKey = backupList[idx].key;
@@ -5318,8 +5268,6 @@ ${logContent}
                                                     }} className="col-span-2 bg-orange-50 text-orange-800 py-3 rounded-lg font-bold hover:bg-orange-100 transition text-sm border border-orange-200 shadow-sm flex items-center justify-center gap-2">
                                                         <span>↺</span> 자동 백업 복구
                                                     </button>
-
-                                                    {/* 전체 데이터 초기화 */}
                                                     <button onClick={() => {
                                                         if (!confirm('배송 목록, 출발지, 도착지 등 모든 데이터가 삭제됩니다. 진행하시겠습니까?')) return;
                                                         StorageManager.clearAll();
@@ -6072,15 +6020,62 @@ ${logContent}
                                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-6">
                                     <div className="flex items-center justify-between mb-3">
                                         <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                                            🗑️ 데이터 관리
+                                            🔄 데이터 동기화
                                         </h3>
+                                        <button onClick={() => setCloudModalOpen(true)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition flex items-center gap-1 ${isCloudConnected ? 'bg-white text-slate-500 border-slate-200' : 'bg-indigo-600 text-white border-indigo-600 shadow-md animate-pulse'}`}>
+                                            {isCloudConnected ? "⚙️ 서버 설정" : "☁️ 서버 연결하기"}
+                                        </button>
                                     </div>
                                     <div className="grid grid-cols-2 gap-3">
+                                        {/* Cloud Buttons - Always Visible */}
+                                        <button onClick={() => handleCloudSync('pull')} className="col-span-2 bg-indigo-600 text-white py-4 rounded-lg font-bold hover:bg-indigo-700 transition text-sm shadow-lg shadow-indigo-200 flex items-center justify-center gap-2">
+                                            <span className="text-xl">☁️</span>
+                                            <span>서버에서 목록 불러오기</span>
+                                        </button>
+                                        <button onClick={() => handleCloudSync('push')} className="col-span-2 bg-white text-indigo-900 py-3 rounded-lg font-bold hover:bg-sky-50 transition text-sm border border-indigo-200 flex items-center justify-center gap-2 mb-2">
+                                            <span className="text-xl">☁️</span>
+                                            <span>작업 결과 서버에 저장</span>
+                                        </button>
+
                                         <button onClick={showDeleteRangePrompt} className="col-span-2 bg-red-50 text-red-700 py-3 rounded-lg font-bold hover:bg-red-100 transition text-sm border border-red-200 flex items-center justify-center gap-2">
                                             <span className="text-xl">🗑️</span>
                                             <span>데이터 삭제</span>
                                         </button>
+
+                                        <button onClick={() => {
+                                            const blob = new Blob([JSON.stringify(deliveries)], {type: "application/json"});
+                                            const url = URL.createObjectURL(blob);
+                                            const a = document.createElement('a');
+                                            a.href = url;
+                                            a.download = `driver_data_${new Date().toISOString().slice(0,10)}.json`;
+                                            a.click();
+                                        }} className="bg-white text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-50 transition text-sm border border-slate-200 shadow-sm flex flex-col items-center justify-center gap-1">
+                                            <span className="text-xl">📤</span>
+                                            <span>파일로 저장</span>
+                                        </button>
+                                        <label className="bg-white text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-50 transition text-sm border border-slate-200 shadow-sm flex flex-col items-center justify-center gap-1 cursor-pointer">
+                                            <span className="text-xl">📥</span>
+                                            <span>파일 불러오기</span>
+                                            <input type="file" hidden accept=".json" onChange={(e) => {
+                                                const file = e.target.files[0];
+                                                if(!file) return;
+                                                readJsonFileWithEncoding(file, (data) => {
+                                                    if(Array.isArray(data)) {
+                                                        if(confirm(`총 ${data.length}건의 데이터를 불러오시겠습니까? 현재 데이터는 덮어씌워집니다.`)) {
+                                                            setDeliveries(data);
+                                                            StorageManager.saveDeliveries(data);
+                                                            alert("데이터가 업데이트되었습니다.");
+                                                        }
+                                                    } else {
+                                                        alert("올바르지 않은 데이터 형식입니다.");
+                                                    }
+                                                });
+                                            }} />
+                                        </label>
                                     </div>
+                                    <p className="text-xs text-slate-400 mt-2 text-center">
+                                        * 관리자가 보낸 파일을 '불러오기' 하고, 작업 후 '저장'하여 관리자에게 보내세요.
+                                    </p>
                                 </div>
                                 
                                 {/* Undo Button (Floating) */}
