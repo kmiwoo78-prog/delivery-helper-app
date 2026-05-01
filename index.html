@@ -5612,7 +5612,11 @@ ${logContent}
                                         const groupId = (group.ids || []).join('_') || group.id || String(Math.random());
                                         const isExpanded = expandedGroups[groupId] === true; // Default Closed
                                         const dist = startPoint && group.lat && group.lng ? getDistance(startPoint.lat, startPoint.lng, group.lat, group.lng).toFixed(1) : null;
-                                        const directInstall = ((group.address || '').includes('고객직접설치') || (group.address || '').includes('직접설치'));
+                                        const directInstall = (
+                                            (group.address || '').includes('고객직접설치') || 
+                                            (group.address || '').includes('직접설치') ||
+                                            (group.items || []).some(it => (it.item || '').includes('직접설치') || (it.item || '').includes('직접'))
+                                        );
 
                                         return (
                                         <div 
@@ -5673,28 +5677,23 @@ ${logContent}
                                             )}
 
                                             <div className="card-body">
-                                                {/* Header: 번호 + 📞아이콘(전화연결) + 전화번호(수정가능) + 상태배지 */}
+                                                {/* Header: 번호+전화번호 박스 + 상태배지 */}
                                                 <div className="ml-3 mb-2 flex items-center gap-2">
-                                                    {/* 배송 번호 - 전화박스와 동일 높이 */}
-                                                    <div className="inline-flex w-12 h-12 border-2 border-indigo-600 text-indigo-600 rounded-full text-[15px] font-extrabold items-center justify-center shrink-0 bg-white">
-                                                        {group.sequence_number || '-'}
-                                                    </div>
-
-                                                    {/* 📞 아이콘 + 전화번호 같은 박스 */}
+                                                    {/* 전화번호 박스 - 번호가 왼쪽 안에 포함 */}
                                                     <div className="flex items-center flex-1 bg-indigo-600 rounded-xl overflow-hidden min-w-0" style={{height:'48px'}}>
-                                                        {/* 아이콘: 전화 연결 */}
+                                                        {/* 번호: 박스 왼쪽에 작게 */}
                                                         <a
                                                             href={`tel:${group.phone}`}
                                                             onClick={(e) => e.stopPropagation()}
-                                                            className="flex items-center justify-center w-12 h-12 text-white text-lg shrink-0"
+                                                            className="flex items-center justify-center w-10 h-full shrink-0 border-r border-indigo-500"
                                                         >
-                                                            📞
+                                                            <span className="text-white font-extrabold text-[15px]">{group.sequence_number || '-'}</span>
                                                         </a>
                                                         {/* 전화번호: 숫자 클릭하면 수정 */}
                                                         {editingPhoneGroupId === groupId ? (
                                                             <input
                                                                 type="tel"
-                                                                className="flex-1 bg-transparent text-white font-extrabold text-[22px] px-1 outline-none min-w-0"
+                                                                className="flex-1 bg-transparent text-white font-extrabold text-[22px] px-3 outline-none min-w-0"
                                                                 value={editingPhoneValue}
                                                                 onChange={(e) => setEditingPhoneValue(e.target.value)}
                                                                 onBlur={(e) => { updateGroupContact(group.ids, { phone: e.target.value }); setEditingPhoneGroupId(null); }}
@@ -5704,7 +5703,7 @@ ${logContent}
                                                             />
                                                         ) : (
                                                             <span
-                                                                className="flex-1 text-white font-extrabold text-[22px] pr-3 truncate cursor-pointer"
+                                                                className="flex-1 text-white font-extrabold text-[22px] px-3 truncate cursor-pointer"
                                                                 onClick={(e) => { e.stopPropagation(); setEditingPhoneGroupId(groupId); setEditingPhoneValue(group.phone || ''); }}
                                                             >
                                                                 {group.phone || '번호없음'}
@@ -5714,7 +5713,7 @@ ${logContent}
 
                                                     {/* 상태 배지 */}
                                                     <div className="flex items-center gap-1 shrink-0">
-                                                        {directInstall && <span className="text-[10px] font-bold text-white bg-red-600 px-2 py-1 rounded-full">직접</span>}
+                                                        {group.items && group.items.some(it => it.item && (it.item.includes('직접설치') || it.item.includes('직접'))) && <span className="text-[10px] font-bold text-white bg-red-600 px-2 py-1 rounded-full">직접</span>}
                                                         {group.time && <span className="text-[10px] font-bold text-white bg-indigo-500 px-2 py-1 rounded-full">⏰ {group.time}</span>}
                                                         {group.unattended && <span className="text-[10px] font-bold text-white bg-sky-600 px-2 py-1 rounded-full">무인</span>}
                                                         {group.canceled && group.cancel_type === 'postpone' && <span className="text-[10px] font-bold text-white bg-orange-500 px-2 py-1 rounded-full">연기</span>}
@@ -5790,13 +5789,13 @@ ${logContent}
 
                                                 {/* 접힌 상태: 상품명 위 → 주소 아래 */}
                                                 {!isExpanded && group.items && group.items.length > 0 && (
-                                                    <div className="mb-1 flex items-start gap-1">
-                                                        <span className="text-xs text-slate-500 shrink-0 mt-0.5">📦</span>
-                                                        <span className="text-sm font-semibold text-slate-800 leading-snug">{group.items[0] && group.items[0].item ? group.items[0].item : ''}</span>
+                                                    <div className="mb-1 flex items-center gap-1 overflow-hidden">
+                                                        <span className="text-xs text-slate-400 shrink-0">📦</span>
+                                                        <span className="text-sm font-semibold text-slate-700 truncate whitespace-nowrap overflow-hidden">{group.items[0] && group.items[0].item ? group.items[0].item : ''}</span>
                                                     </div>
                                                 )}
 
-                                                {/* 주소 - 클릭하면 카드 펼침 */}
+                                                {/* 주소 - 클릭하면 카드 펼침, 색 연하게 */}
                                                 {view === 'driver' ? (
                                                     <div
                                                         className="mb-1 cursor-pointer"
@@ -5806,11 +5805,11 @@ ${logContent}
                                                         }}
                                                     >
                                                         <div className="flex items-start gap-1">
-                                                            <span className="text-xs text-slate-500 shrink-0 mt-0.5">📍</span>
-                                                            <div className="text-sm leading-snug font-semibold text-slate-800">
+                                                            <span className="text-xs text-slate-400 shrink-0 mt-0.5">📍</span>
+                                                            <div className="text-sm leading-snug font-medium text-slate-400">
                                                                 <span>{(group.address || '').replace(/\s*\(.*$/, '').trim()}</span>
                                                                 {/\(/.test(group.address || '') && (
-                                                                    <span className="block text-xs text-slate-400 font-normal mt-0.5">
+                                                                    <span className="block text-xs text-slate-300 font-normal mt-0.5">
                                                                         {(group.address || '').match(/\(.*\)/) ? (group.address || '').match(/\(.*\)/)[0] : ''}
                                                                     </span>
                                                                 )}
