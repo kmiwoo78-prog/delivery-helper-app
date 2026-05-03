@@ -5685,7 +5685,7 @@ ${logContent}
                                                         <a
                                                             href={`tel:${group.phone}`}
                                                             onClick={(e) => e.stopPropagation()}
-                                                            className="flex items-center justify-center w-10 h-full shrink-0 border-r border-indigo-500"
+                                                            className="flex items-center justify-center w-10 h-full shrink-0 bg-violet-800"
                                                         >
                                                             <span className="text-white font-extrabold text-[15px]">{group.sequence_number || '-'}</span>
                                                         </a>
@@ -5747,14 +5747,14 @@ ${logContent}
                                                         {openTimePickerId === groupId && (
                                                             <div className="absolute top-full left-0 mt-2 w-full bg-white border rounded-xl shadow-xl z-50 p-3" onClick={(e) => e.stopPropagation()}>
                                                                 <div className="mb-2 text-xs text-slate-500 font-bold px-1">예약 시간 선택</div>
-                                                                <div className="grid grid-cols-4 gap-2 max-h-60 overflow-y-auto">
+                                                                <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto">
                                                                     {TIME_SLOTS.map(t => {
                                                                         const disabled = checkTimeConflict(t, group.duration || 30, group.ids);
                                                                         return (
                                                                             <button 
                                                                                 key={t}
                                                                                 disabled={disabled}
-                                                                                className={`px-2 py-3 rounded-lg border text-sm font-bold shadow-sm transition-all active:scale-95 ${
+                                                                                className={`py-3 rounded-lg border text-base font-bold shadow-sm transition-all active:scale-95 ${
                                                                                     group.time === t ? 'bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-200' : 
                                                                                     disabled ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200'
                                                                                 }`}
@@ -5789,32 +5789,29 @@ ${logContent}
 
                                                 {/* 접힌 상태: 상품명 위 → 주소 아래 */}
                                                 {!isExpanded && group.items && group.items.length > 0 && (
-                                                    <div className="mb-1 flex items-center gap-1 overflow-hidden">
-                                                        <span className="text-xs text-slate-400 shrink-0">📦</span>
-                                                        <span className="text-sm font-semibold text-slate-700 truncate whitespace-nowrap overflow-hidden">{group.items[0] && group.items[0].item ? group.items[0].item : ''}</span>
+                                                    <div className="mb-1 flex items-start gap-1">
+                                                        <span className="text-xs text-slate-400 shrink-0 mt-0.5">📦</span>
+                                                        <span className="text-sm font-semibold text-slate-700 leading-snug" style={{display:'-webkit-box',WebkitLineClamp:'3',WebkitBoxOrient:'vertical',overflow:'hidden',whiteSpace:'normal'}}>{group.items[0] && group.items[0].item ? group.items[0].item : ''}</span>
                                                     </div>
                                                 )}
 
-                                                {/* 주소 - 클릭하면 카드 펼침, 색 연하게 */}
+                                                {/* 주소 - 가운데 정렬 + 파란색 + 클릭하면 카드 펼침 */}
                                                 {view === 'driver' ? (
                                                     <div
-                                                        className="mb-1 cursor-pointer"
+                                                        className="mb-1 cursor-pointer text-center"
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
                                                         }}
                                                     >
-                                                        <div className="flex items-start gap-1">
-                                                            <span className="text-xs text-slate-400 shrink-0 mt-0.5">📍</span>
-                                                            <div className="text-sm leading-snug font-medium text-slate-400">
-                                                                <span>{(group.address || '').replace(/\s*\(.*$/, '').trim()}</span>
-                                                                {/\(/.test(group.address || '') && (
-                                                                    <span className="block text-xs text-slate-300 font-normal mt-0.5">
-                                                                        {(group.address || '').match(/\(.*\)/) ? (group.address || '').match(/\(.*\)/)[0] : ''}
-                                                                    </span>
-                                                                )}
-                                                            </div>
+                                                        <div className="text-sm leading-snug font-medium text-blue-500">
+                                                            🏠 {(group.address || '').replace(/\s*\(.*$/, '').trim()}
                                                         </div>
+                                                        {/\(/.test(group.address || '') && (
+                                                            <div className="text-xs text-blue-300 font-normal mt-0.5">
+                                                                {(group.address || '').match(/\(.*\)/) ? (group.address || '').match(/\(.*\)/)[0] : ''}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 ) : (
                                                     <div className="address">📍 {formatAddressDisplay(group.address)}</div>
