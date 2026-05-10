@@ -2545,7 +2545,9 @@
                     const pending = deliveries.filter(d => {
                         const lat = Number(d.lat);
                         const lng = Number(d.lng);
-                        return (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) && d.address;
+                        const noCoord = isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0;
+                        const isFallback = !noCoord && isFallbackCoord(lat, lng);
+                        return (noCoord || isFallback) && d.address;
                     });
                     if (pending.length > 0) {
                         console.log(`[AutoGeocode] Found ${pending.length} missing coords. Running background geocode...`);
@@ -4157,12 +4159,25 @@
                 }
             }
             
+            // 좌표가 fallback 기본값 근처인지 확인 (김포시청, 서울시청 등)
+            function isFallbackCoord(lat, lng) {
+                const fallbacks = [
+                    { lat: 37.6152, lng: 126.7156 }, // 김포
+                    { lat: 37.5665, lng: 126.9780 }, // 서울
+                    { lat: 37.4563, lng: 126.7052 }, // 인천
+                    { lat: 37.6153, lng: 126.7150 }, // 김포2
+                ];
+                return fallbacks.some(f => Math.abs(lat - f.lat) < 0.02 && Math.abs(lng - f.lng) < 0.02);
+            }
+
             async function backgroundGeocode(list) {
                 const pending = (list || []).filter(d => {
                     const lat = Number(d.lat);
                     const lng = Number(d.lng);
-                    // 좌표가 누락되었거나(0, null) 지오코딩 보류 상태가 아닌 것만 (즉, 계속 무한 반복하지 않도록 제한)
-                    return (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) && d.address && d.geocode_pending !== false;
+                    // 좌표 없거나 fallback 기본값이면 재시도
+                    const noCoord = isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0;
+                    const isFallback = !noCoord && isFallbackCoord(lat, lng);
+                    return (noCoord || isFallback) && d.address && d.geocode_pending !== false;
                 });
                 if (pending.length === 0) return;
                 
