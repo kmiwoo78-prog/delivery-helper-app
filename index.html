@@ -5881,177 +5881,20 @@ ${logContent}
                                                 )}
 
                                             
-                                                {/* 타임마크 - 도착/완료 시간 표시 */}
-                                                {(group.arrived_at || group.completed_at) && (
-                                                    <div className="flex gap-2 mb-2 text-xs text-slate-500">
-                                                        {group.arrived_at && (
-                                                            <span className="flex-1 bg-blue-50 border border-blue-100 rounded-lg px-2 py-1.5 text-center">
-                                                                🕐 도착 {group.arrived_at}
-                                                            </span>
-                                                        )}
-                                                        {group.completed_at && (
-                                                            <span className="flex-1 bg-green-50 border border-green-100 rounded-lg px-2 py-1.5 text-center">
-                                                                ✅ 완료 {group.completed_at}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                )}
-
-                                                {/* 도착 버튼 + 완료 사진 버튼 */}
-                                                {!group.completed && (
-                                                    <div className="grid grid-cols-2 gap-2 mb-2">
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                const now = new Date();
-                                                                const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-                                                                updateGroupStatus(group.ids, { arrived_at: timeStr });
-                                                            }}
-                                                            className={`py-2.5 text-sm font-bold rounded-xl transition-all active:scale-95 border ${
-                                                                group.arrived_at
-                                                                ? 'bg-blue-100 text-blue-700 border-blue-200'
-                                                                : 'bg-white text-blue-600 border-blue-300 hover:bg-blue-50'
-                                                            }`}
-                                                        >
-                                                            🕐 {group.arrived_at ? `도착 ${group.arrived_at}` : '도착'}
-                                                        </button>
-                                                        <label className="py-2.5 text-sm font-bold rounded-xl bg-white text-slate-600 border border-slate-300 hover:bg-slate-50 transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer">
-                                                            📷 완료 사진
-                                                            <input
-                                                                type="file"
-                                                                accept="image/*"
-                                                                capture="environment"
-                                                                hidden
-                                                                onChange={(e) => {
-                                                                    const file = e.target.files[0];
-                                                                    if (!file) return;
-                                                                    const now = new Date();
-                                                                    const address = group.address || '';
-
-                                                                    // 위치 가져와서 캔버스에 워터마크 합성
-                                                                    const processPhoto = (locationStr) => {
-                                                                        const img = new Image();
-                                                                        img.onload = () => {
-                                                                            const canvas = document.createElement('canvas');
-                                                                            canvas.width = img.width;
-                                                                            canvas.height = img.height;
-                                                                            const ctx = canvas.getContext('2d');
-                                                                            ctx.drawImage(img, 0, 0);
-
-                                                                            // 워터마크 배경 (하단)
-                                                                            const wh = Math.round(img.height * 0.18);
-                                                                            ctx.fillStyle = 'rgba(0,0,0,0.62)';
-                                                                            ctx.fillRect(0, img.height - wh, img.width, wh);
-
-                                                                            // 시간 (큰 글씨)
-                                                                            const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-                                                                            const timeFontSize = Math.round(img.width * 0.11);
-                                                                            ctx.font = `bold ${timeFontSize}px Arial`;
-                                                                            ctx.fillStyle = '#ffffff';
-                                                                            ctx.fillText(timeStr, Math.round(img.width * 0.04), img.height - wh + Math.round(wh * 0.55));
-
-                                                                            // 날짜
-                                                                            const days = ['일','월','화','수','목','금','토'];
-                                                                            const dateStr = `${now.getFullYear()}년 ${String(now.getMonth()+1).padStart(2,'0')}월 ${String(now.getDate()).padStart(2,'0')}일 ${days[now.getDay()]}요일`;
-                                                                            const dateFontSize = Math.round(img.width * 0.038);
-                                                                            ctx.font = `${dateFontSize}px Arial`;
-                                                                            ctx.fillStyle = '#dddddd';
-                                                                            ctx.fillText(dateStr, Math.round(img.width * 0.04), img.height - wh + Math.round(wh * 0.75));
-
-                                                                            // 위치
-                                                                            const locFontSize = Math.round(img.width * 0.034);
-                                                                            ctx.font = `${locFontSize}px Arial`;
-                                                                            ctx.fillStyle = '#aaddff';
-                                                                            ctx.fillText(locationStr, Math.round(img.width * 0.04), img.height - wh + Math.round(wh * 0.92));
-
-                                                                            // 저장 - Web Share API 우선 (모바일 갤러리 저장)
-                                                                            canvas.toBlob(async (blob) => {
-                                                                                const fnTime = `${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
-                                                                                const fileName = `배송완료_${address.slice(0,10)}_${fnTime}.jpg`;
-                                                                                const shareFile = new File([blob], fileName, { type: 'image/jpeg' });
-
-                                                                                // Web Share API (모바일에서 갤러리 저장 가능)
-                                                                                if (navigator.share && navigator.canShare && navigator.canShare({ files: [shareFile] })) {
-                                                                                    try {
-                                                                                        await navigator.share({
-                                                                                            files: [shareFile],
-                                                                                            title: '배송 완료 사진'
-                                                                                        });
-                                                                                    } catch(err) {
-                                                                                        if (err.name !== 'AbortError') {
-                                                                                            // 공유 실패 시 다운로드로 대체
-                                                                                            const url2 = URL.createObjectURL(blob);
-                                                                                            const a = document.createElement('a');
-                                                                                            a.href = url2;
-                                                                                            a.download = fileName;
-                                                                                            a.click();
-                                                                                            setTimeout(() => URL.revokeObjectURL(url2), 1000);
-                                                                                        }
-                                                                                    }
-                                                                                } else {
-                                                                                    // Web Share 미지원 → 다운로드
-                                                                                    const url2 = URL.createObjectURL(blob);
-                                                                                    const a = document.createElement('a');
-                                                                                    a.href = url2;
-                                                                                    a.download = fileName;
-                                                                                    a.click();
-                                                                                    setTimeout(() => URL.revokeObjectURL(url2), 1000);
-                                                                                }
-                                                                            }, 'image/jpeg', 0.92);
-                                                                        };
-                                                                        img.src = URL.createObjectURL(file);
-                                                                    };
-
-                                                                    // GPS 위치 시도
-                                                                    if (navigator.geolocation) {
-                                                                        navigator.geolocation.getCurrentPosition(
-                                                                            (pos) => {
-                                                                                // 카카오 좌표→주소 변환
-                                                                                if (window.kakao && window.kakao.maps && window.kakao.maps.services) {
-                                                                                    const geocoder = new window.kakao.maps.services.Geocoder();
-                                                                                    geocoder.coord2Address(pos.coords.longitude, pos.coords.latitude, (result, status) => {
-                                                                                        if (status === window.kakao.maps.services.Status.OK && result[0]) {
-                                                                                            const road = result[0].road_address;
-                                                                                            const jibun = result[0].address;
-                                                                                            const locStr = road ? road.address_name : (jibun ? jibun.address_name : address.slice(0,25));
-                                                                                            processPhoto(locStr);
-                                                                                        } else {
-                                                                                            processPhoto(address.slice(0,30));
-                                                                                        }
-                                                                                    });
-                                                                                } else {
-                                                                                    processPhoto(address.slice(0,30));
-                                                                                }
-                                                                            },
-                                                                            () => processPhoto(address.slice(0,30)),
-                                                                            { timeout: 5000 }
-                                                                        );
-                                                                    } else {
-                                                                        processPhoto(address.slice(0,30));
-                                                                    }
-                                                                    e.target.value = '';
-                                                                }}
-                                                            />
-                                                        </label>
-                                                    </div>
-                                                )}
-
                                                 <button 
                                                     onClick={(e) => { 
                                                         e.stopPropagation(); 
                                                         const newState = !group.completed;
-                                                        const now = new Date();
-                                                        const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
                                                         updateGroupStatus(group.ids, { 
                                                             completed: newState,
-                                                            completed_at: newState ? timeStr : null,
+                                                            // 완료 시 취소/연기 해제
                                                             canceled: newState ? false : group.canceled,
                                                             cancel_type: newState ? null : group.cancel_type
                                                         }); 
                                                     }} 
                                                     className={`complete-btn w-full mb-2 ${group.completed ? 'opacity-80' : ''}`}
                                                 >
-                                                    {group.completed ? `✅ 완료됨 ${group.completed_at || ''} (취소하려면 클릭)` : '🚚 배송 완료'}
+                                                    {group.completed ? '✅ 배송 완료됨 (취소하려면 클릭)' : '🚚 배송 완료'}
                                                 </button>
                                                 <div className="grid grid-cols-2 gap-2 mb-2">
                                                     <button
