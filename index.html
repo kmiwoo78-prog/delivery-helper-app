@@ -759,24 +759,41 @@
                     ctx.fillStyle = '#aaddff';
                     ctx.fillText(locationStr, Math.round(img.width * 0.04), img.height - wh + Math.round(wh * 0.92));
 
-                    canvas.toBlob(async (blob) => {
+                    canvas.toBlob((blob) => {
                         const fileName = `배송_${address.slice(0,8)}_${fnTime}.jpg`;
-                        const shareFile = new File([blob], fileName, { type: 'image/jpeg' });
-                        if (navigator.share && navigator.canShare && navigator.canShare({ files: [shareFile] })) {
-                            try {
-                                await navigator.share({ files: [shareFile], title: '배송 사진' });
-                            } catch(err) {
-                                if (err.name !== 'AbortError') {
-                                    const url2 = URL.createObjectURL(blob);
-                                    const a = document.createElement('a'); a.href = url2; a.download = fileName; a.click();
-                                    setTimeout(() => URL.revokeObjectURL(url2), 1000);
-                                }
-                            }
-                        } else {
-                            const url2 = URL.createObjectURL(blob);
-                            const a = document.createElement('a'); a.href = url2; a.download = fileName; a.click();
-                            setTimeout(() => URL.revokeObjectURL(url2), 1000);
-                        }
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+
+                        // 미리보기 모달 - 저장 버튼 클릭으로 갤러리 저장 (사용자 직접 클릭 = 브라우저 허용)
+                        const overlay = document.createElement('div');
+                        overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;';
+
+                        const imgEl = document.createElement('img');
+                        imgEl.src = dataUrl;
+                        imgEl.style.cssText = 'max-width:100%;max-height:65vh;border-radius:10px;object-fit:contain;';
+
+                        const btnWrap = document.createElement('div');
+                        btnWrap.style.cssText = 'display:flex;gap:10px;width:100%;max-width:380px;';
+
+                        // 저장 버튼 - 직접 클릭이므로 브라우저가 허용
+                        const saveBtn = document.createElement('a');
+                        saveBtn.href = dataUrl;
+                        saveBtn.download = fileName;
+                        saveBtn.textContent = '💾 갤러리 저장';
+                        saveBtn.style.cssText = 'flex:1;background:#4f46e5;color:white;font-weight:800;font-size:15px;padding:14px;border-radius:12px;text-align:center;text-decoration:none;';
+                        saveBtn.onclick = () => setTimeout(() => document.body.removeChild(overlay), 500);
+
+                        // 닫기 버튼
+                        const closeBtn = document.createElement('button');
+                        closeBtn.textContent = '✕ 닫기';
+                        closeBtn.style.cssText = 'flex:0.6;background:#374151;color:white;font-weight:700;font-size:15px;padding:14px;border-radius:12px;border:none;cursor:pointer;';
+                        closeBtn.onclick = () => document.body.removeChild(overlay);
+
+                        btnWrap.appendChild(saveBtn);
+                        btnWrap.appendChild(closeBtn);
+                        overlay.appendChild(imgEl);
+                        overlay.appendChild(btnWrap);
+                        document.body.appendChild(overlay);
+
                         resolve();
                     }, 'image/jpeg', 0.92);
                 };
