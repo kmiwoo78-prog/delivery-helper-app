@@ -40,6 +40,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
     <!-- SortableJS (드래그 앤 드롭) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
     
     <!-- 지도 (Kakao) -->
     <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=d076380daed8d8b5c9b9e98cb190bbee&libraries=services&autoload=false"></script>
@@ -729,73 +730,80 @@
                 );
             });
 
-            const locationStr = await getLocationStr();
-
+            // [속도 개선] 사진 먼저 표시하고 주소는 백그라운드에서 가져와서 업데이트
             return new Promise((resolve) => {
                 const img = new Image();
                 img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
+                    // 1단계: 주소 없이 먼저 빠르게 미리보기
+                    const renderWithLocation = (locationStr) => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
 
-                    const wh = Math.round(img.height * 0.18);
-                    ctx.fillStyle = 'rgba(0,0,0,0.62)';
-                    ctx.fillRect(0, img.height - wh, img.width, wh);
+                        const wh = Math.round(img.height * 0.18);
+                        ctx.fillStyle = 'rgba(0,0,0,0.62)';
+                        ctx.fillRect(0, img.height - wh, img.width, wh);
 
-                    const timeFontSize = Math.round(img.width * 0.11);
-                    ctx.font = `bold ${timeFontSize}px Arial`;
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillText(timeStr, Math.round(img.width * 0.04), img.height - wh + Math.round(wh * 0.55));
+                        const timeFontSize = Math.round(img.width * 0.11);
+                        ctx.font = `bold ${timeFontSize}px Arial`;
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillText(timeStr, Math.round(img.width * 0.04), img.height - wh + Math.round(wh * 0.55));
 
-                    const dateFontSize = Math.round(img.width * 0.038);
-                    ctx.font = `${dateFontSize}px Arial`;
-                    ctx.fillStyle = '#dddddd';
-                    ctx.fillText(dateStr, Math.round(img.width * 0.04), img.height - wh + Math.round(wh * 0.75));
+                        const dateFontSize = Math.round(img.width * 0.038);
+                        ctx.font = `${dateFontSize}px Arial`;
+                        ctx.fillStyle = '#dddddd';
+                        ctx.fillText(dateStr, Math.round(img.width * 0.04), img.height - wh + Math.round(wh * 0.75));
 
-                    const locFontSize = Math.round(img.width * 0.034);
-                    ctx.font = `${locFontSize}px Arial`;
-                    ctx.fillStyle = '#aaddff';
-                    ctx.fillText(locationStr, Math.round(img.width * 0.04), img.height - wh + Math.round(wh * 0.92));
+                        const locFontSize = Math.round(img.width * 0.034);
+                        ctx.font = `${locFontSize}px Arial`;
+                        ctx.fillStyle = '#aaddff';
+                        ctx.fillText(locationStr || '위치 확인 중...', Math.round(img.width * 0.04), img.height - wh + Math.round(wh * 0.92));
 
-                    canvas.toBlob((blob) => {
-                        const fileName = `배송_${address.slice(0,8)}_${fnTime}.jpg`;
                         const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+                        const fileName = `배송_${address.slice(0,8)}_${fnTime}.jpg`;
+                        return { dataUrl, fileName };
+                    };
 
-                        // 미리보기 모달 - 저장 버튼 클릭으로 갤러리 저장 (사용자 직접 클릭 = 브라우저 허용)
-                        const overlay = document.createElement('div');
-                        overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;';
+                    // 1단계: 주소 없이 즉시 미리보기 표시
+                    const { dataUrl: initUrl, fileName } = renderWithLocation('위치 확인 중...');
 
-                        const imgEl = document.createElement('img');
-                        imgEl.src = dataUrl;
-                        imgEl.style.cssText = 'max-width:100%;max-height:65vh;border-radius:10px;object-fit:contain;';
+                    const overlay = document.createElement('div');
+                    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;';
 
-                        const btnWrap = document.createElement('div');
-                        btnWrap.style.cssText = 'display:flex;gap:10px;width:100%;max-width:380px;';
+                    const imgEl = document.createElement('img');
+                    imgEl.src = initUrl;
+                    imgEl.style.cssText = 'max-width:100%;max-height:65vh;border-radius:10px;object-fit:contain;';
 
-                        // 저장 버튼 - 직접 클릭이므로 브라우저가 허용
-                        const saveBtn = document.createElement('a');
-                        saveBtn.href = dataUrl;
-                        saveBtn.download = fileName;
-                        saveBtn.textContent = '💾 갤러리 저장';
-                        saveBtn.style.cssText = 'flex:1;background:#4f46e5;color:white;font-weight:800;font-size:15px;padding:14px;border-radius:12px;text-align:center;text-decoration:none;';
-                        saveBtn.onclick = () => setTimeout(() => document.body.removeChild(overlay), 500);
+                    const btnWrap = document.createElement('div');
+                    btnWrap.style.cssText = 'display:flex;gap:10px;width:100%;max-width:380px;';
 
-                        // 닫기 버튼
-                        const closeBtn = document.createElement('button');
-                        closeBtn.textContent = '✕ 닫기';
-                        closeBtn.style.cssText = 'flex:0.6;background:#374151;color:white;font-weight:700;font-size:15px;padding:14px;border-radius:12px;border:none;cursor:pointer;';
-                        closeBtn.onclick = () => document.body.removeChild(overlay);
+                    const saveBtn = document.createElement('a');
+                    saveBtn.href = initUrl;
+                    saveBtn.download = fileName;
+                    saveBtn.textContent = '💾 갤러리 저장';
+                    saveBtn.style.cssText = 'flex:1;background:#4f46e5;color:white;font-weight:800;font-size:15px;padding:14px;border-radius:12px;text-align:center;text-decoration:none;';
+                    saveBtn.onclick = () => setTimeout(() => { if(document.body.contains(overlay)) document.body.removeChild(overlay); }, 500);
 
-                        btnWrap.appendChild(saveBtn);
-                        btnWrap.appendChild(closeBtn);
-                        overlay.appendChild(imgEl);
-                        overlay.appendChild(btnWrap);
-                        document.body.appendChild(overlay);
+                    const closeBtn = document.createElement('button');
+                    closeBtn.textContent = '✕ 닫기';
+                    closeBtn.style.cssText = 'flex:0.6;background:#374151;color:white;font-weight:700;font-size:15px;padding:14px;border-radius:12px;border:none;cursor:pointer;';
+                    closeBtn.onclick = () => { if(document.body.contains(overlay)) document.body.removeChild(overlay); };
 
-                        resolve();
-                    }, 'image/jpeg', 0.92);
+                    btnWrap.appendChild(saveBtn);
+                    btnWrap.appendChild(closeBtn);
+                    overlay.appendChild(imgEl);
+                    overlay.appendChild(btnWrap);
+                    document.body.appendChild(overlay);
+                    resolve();
+
+                    // 2단계: 백그라운드에서 주소 가져와서 이미지 업데이트
+                    getLocationStr().then(locationStr => {
+                        const { dataUrl: finalUrl } = renderWithLocation(locationStr);
+                        imgEl.src = finalUrl;
+                        saveBtn.href = finalUrl;
+                    });
                 };
                 img.src = URL.createObjectURL(file);
             });
@@ -1784,6 +1792,98 @@
         }
 
         // [메인 앱]
+        // 바코드 스캐너 컴포넌트
+        function BarcodeScannerEffect({ isActive, deliveries, scannedItems, setScannedItems }) {
+            const [lastScanned, setLastScanned] = React.useState('');
+            const streamRef = React.useRef(null);
+            const rafRef = React.useRef(null);
+
+            React.useEffect(() => {
+                if (!isActive) return;
+
+                const video = document.getElementById('barcode-video');
+                if (!video) return;
+
+                // 카메라 시작
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+                    .then(stream => {
+                        streamRef.current = stream;
+                        video.srcObject = stream;
+                        video.play();
+                        scanFrame(video);
+                    })
+                    .catch(err => {
+                        alert('카메라 접근 권한이 필요합니다.');
+                        console.error(err);
+                    });
+
+                return () => {
+                    if (streamRef.current) {
+                        streamRef.current.getTracks().forEach(t => t.stop());
+                    }
+                    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+                };
+            }, [isActive]);
+
+            const scanFrame = (video) => {
+                if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) {
+                    rafRef.current = requestAnimationFrame(() => scanFrame(video));
+                    return;
+                }
+
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0);
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+                if (window.jsQR) {
+                    const code = window.jsQR(imageData.data, imageData.width, imageData.height, {
+                        inversionAttempts: 'dontInvert'
+                    });
+
+                    if (code && code.data && code.data !== lastScanned) {
+                        const scannedNum = code.data.trim();
+                        setLastScanned(scannedNum);
+
+                        // 배송 데이터와 매칭
+                        const matched = deliveries.find(d =>
+                            d.invoice_number && d.invoice_number.toString().trim() === scannedNum
+                        );
+
+                        if (matched) {
+                            if (!scannedItems.includes(scannedNum)) {
+                                setScannedItems(prev => [...prev, scannedNum]);
+                                // 진동 피드백
+                                if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                                // 성공 알림
+                                const toast = document.createElement('div');
+                                toast.textContent = `✅ 상차 확인: ${matched.address ? matched.address.slice(0,15) : scannedNum}`;
+                                toast.style.cssText = 'position:fixed;top:20%;left:50%;transform:translateX(-50%);background:#22c55e;color:white;font-weight:800;padding:12px 20px;border-radius:12px;z-index:9999;font-size:15px;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+                                document.body.appendChild(toast);
+                                setTimeout(() => { if(document.body.contains(toast)) document.body.removeChild(toast); }, 2000);
+                            }
+                        } else {
+                            // 미등록 송장
+                            if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+                            const toast = document.createElement('div');
+                            toast.textContent = `⚠️ 미등록 송장: ${scannedNum.slice(0,15)}`;
+                            toast.style.cssText = 'position:fixed;top:20%;left:50%;transform:translateX(-50%);background:#ef4444;color:white;font-weight:800;padding:12px 20px;border-radius:12px;z-index:9999;font-size:15px;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+                            document.body.appendChild(toast);
+                            setTimeout(() => { if(document.body.contains(toast)) document.body.removeChild(toast); }, 2000);
+                        }
+
+                        // 1.5초 후 다음 스캔 허용
+                        setTimeout(() => setLastScanned(''), 1500);
+                    }
+                }
+                rafRef.current = requestAnimationFrame(() => scanFrame(video));
+            };
+
+            return null;
+        }
+
         function App() {
             // [State] Global & UI
             const [fatalError, setFatalError] = useState(null); // [New] Critical Error State
@@ -1836,6 +1936,8 @@
 
             // [Modal] 월별 비용 합계 상태
             const [showMonthlyCostModal, setShowMonthlyCostModal] = useState(false);
+            const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+            const [scannedItems, setScannedItems] = useState([]); // 상차 확인된 아이템들
             const [monthlyCostTargetMonth, setMonthlyCostTargetMonth] = useState(new Date().toISOString().slice(0, 7));
             const [monthlyViewMode, setMonthlyViewMode] = useState('month');
             const [monthlyCostTargetDay, setMonthlyCostTargetDay] = useState(new Date().toISOString().slice(0, 10));
@@ -4833,6 +4935,12 @@ ${logContent}
                                      </div> 
                                  
                                     <div className="flex items-center gap-2 shrink-0">
+                                      <button
+                                        onClick={() => setShowBarcodeScanner(true)}
+                                        className="px-3 py-2 rounded-lg bg-amber-500 text-white font-bold text-sm shadow hover:bg-amber-600 whitespace-nowrap"
+                                      >
+                                        📦 상차 스캔
+                                      </button>
                                       <button 
                                         onClick={() => setShowMap(v => !v)} 
                                         className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-bold text-sm shadow hover:bg-indigo-700 whitespace-nowrap" 
@@ -6607,6 +6715,66 @@ ${logContent}
                     )}
 
                     {/* 월별 비용 합계 모달 */}
+                    {/* 상차 바코드 스캐너 모달 */}
+                    {showBarcodeScanner && (
+                        <div className="fixed inset-0 z-[70] bg-black flex flex-col" onClick={(e) => e.stopPropagation()}>
+                            {/* 헤더 */}
+                            <div className="flex items-center justify-between px-4 py-3 bg-black">
+                                <div>
+                                    <h2 className="text-white font-bold text-lg">📦 상차 스캔</h2>
+                                    <p className="text-amber-400 text-xs">스캔됨: {scannedItems.length} / {groupedDeliveries.length}건</p>
+                                </div>
+                                <button onClick={() => setShowBarcodeScanner(false)} className="text-white text-2xl px-2">✕</button>
+                            </div>
+
+                            {/* 카메라 뷰 */}
+                            <div className="relative flex-1 overflow-hidden">
+                                <video
+                                    id="barcode-video"
+                                    className="w-full h-full object-cover"
+                                    autoPlay playsInline muted
+                                />
+                                {/* 스캔 가이드 */}
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                    <div className="w-64 h-32 border-4 border-amber-400 rounded-lg opacity-80">
+                                        <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-amber-400 rounded-tl"></div>
+                                        <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-amber-400 rounded-tr"></div>
+                                        <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-amber-400 rounded-bl"></div>
+                                        <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-amber-400 rounded-br"></div>
+                                    </div>
+                                </div>
+                                <p className="absolute bottom-4 w-full text-center text-white text-sm opacity-80">송장 바코드를 가이드 안에 맞춰주세요</p>
+                            </div>
+
+                            {/* 스캔 결과 목록 */}
+                            <div className="bg-slate-900 max-h-48 overflow-y-auto">
+                                {groupedDeliveries.map(g => {
+                                    const isScanned = scannedItems.includes(g.invoice_number);
+                                    return (
+                                        <div key={g.id} className={`flex items-center gap-3 px-4 py-2 border-b border-slate-800 ${isScanned ? 'bg-green-900/40' : ''}`}>
+                                            <span className={`text-lg ${isScanned ? '✅' : '⬜'}`}>{isScanned ? '✅' : '⬜'}</span>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-white text-sm font-bold truncate">{g.address ? g.address.slice(0,20) : '-'}</p>
+                                                <p className="text-slate-400 text-xs">{g.invoice_number || '송장번호 없음'}</p>
+                                            </div>
+                                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isScanned ? 'bg-green-500 text-white' : 'bg-slate-700 text-slate-400'}`}>
+                                                {isScanned ? '확인' : '미확인'}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* 바코드 스캔 로직 */}
+                            <BarcodeScannerEffect
+                                isActive={showBarcodeScanner}
+                                deliveries={groupedDeliveries}
+                                scannedItems={scannedItems}
+                                setScannedItems={setScannedItems}
+                            />
+                        </div>
+                    )}
+
                     {showMonthlyCostModal && (
                         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={() => setShowMonthlyCostModal(false)}>
                             <div className="bg-white rounded-xl shadow-2xl p-6 max-w-lg w-full relative max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
