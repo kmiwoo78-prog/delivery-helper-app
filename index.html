@@ -4847,17 +4847,32 @@ ${logContent}
                                 
                                 <div className="mt-2 mb-4 flex items-center gap-2 justify-end">
                                     <button
+                                        onClick={() => setShowMap(v => !v)}
+                                        className="px-3 py-2 rounded-lg bg-indigo-600 text-white font-bold text-sm shadow hover:bg-indigo-700 whitespace-nowrap"
+                                    >
+                                        {showMap ? '고객목록' : '코스보기'}
+                                    </button>
+                                    <button
                                         onClick={() => setShowBarcodeScanner(true)}
                                         className="px-3 py-2 rounded-lg bg-amber-500 text-white font-bold text-sm shadow hover:bg-amber-600 whitespace-nowrap"
                                     >
                                         📦 상차 스캔
                                     </button>
-                                    <button
-                                        onClick={() => setShowMap(v => !v)}
-                                        className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-bold text-sm shadow hover:bg-indigo-700 whitespace-nowrap"
-                                    >
-                                        {showMap ? '고객목록' : '코스보기'}
-                                    </button>
+                                    <label className="px-3 py-2 rounded-lg bg-slate-600 text-white font-bold text-sm shadow hover:bg-slate-700 whitespace-nowrap cursor-pointer">
+                                        📷 완료사진
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            capture="environment"
+                                            hidden
+                                            onChange={async (e) => {
+                                                const file = e.target.files[0];
+                                                if (!file) return;
+                                                await takeTimestampPhoto(file, '');
+                                                e.target.value = '';
+                                            }}
+                                        />
+                                    </label>
                                 </div>
                             </>
                         )}
@@ -6018,10 +6033,10 @@ ${logContent}
                                                     </div>
                                                 )}
 
-                                                {/* 도착 버튼 + 완료 사진 버튼 */}
+                                                {/* 도착 버튼 */}
                                                 {!group.completed && (
-                                                    <div className="grid grid-cols-2 gap-2 mb-2">
-                                                        <label className={`py-2.5 text-sm font-bold rounded-xl transition-all active:scale-95 border flex items-center justify-center cursor-pointer ${
+                                                    <div className="mb-2">
+                                                        <label className={`w-full py-2.5 text-sm font-bold rounded-xl transition-all active:scale-95 border flex items-center justify-center cursor-pointer ${
                                                                 group.arrived_at
                                                                 ? 'bg-blue-100 text-blue-700 border-blue-200'
                                                                 : 'bg-white text-blue-600 border-blue-300 hover:bg-blue-50'
@@ -6039,21 +6054,6 @@ ${logContent}
                                                                     const now = new Date();
                                                                     const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
                                                                     updateGroupStatus(group.ids, { arrived_at: timeStr });
-                                                                    await takeTimestampPhoto(file, group.address || '');
-                                                                    e.target.value = '';
-                                                                }}
-                                                            />
-                                                        </label>
-                                                        <label className="py-2.5 text-sm font-bold rounded-xl bg-white text-slate-600 border border-slate-300 hover:bg-slate-50 transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer">
-                                                            📷 완료 사진
-                                                            <input
-                                                                type="file"
-                                                                accept="image/*"
-                                                                capture="environment"
-                                                                hidden
-                                                                onChange={async (e) => {
-                                                                    const file = e.target.files[0];
-                                                                    if (!file) return;
                                                                     await takeTimestampPhoto(file, group.address || '');
                                                                     e.target.value = '';
                                                                 }}
