@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -1875,8 +1876,8 @@
             // [Modal] 월별 비용 합계 상태
             const [showMonthlyCostModal, setShowMonthlyCostModal] = useState(false);
             const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
-            const [driverTransferModal, setDriverTransferModal] = useState(null); // {ids, address}
-            const [selectedDriver, setSelectedDriver] = useState('');
+
+            const [fabOpen, setFabOpen] = useState(false);
             const [scannedItems, setScannedItems] = useState([]);
             const [monthlyCostTargetMonth, setMonthlyCostTargetMonth] = useState(new Date().toISOString().slice(0, 7));
             const [monthlyViewMode, setMonthlyViewMode] = useState('month');
@@ -6060,24 +6061,36 @@ ${logContent}
                                                         {(group.canceled && group.cancel_type === 'postpone') ? '연기됨 (해제)' : '연기'}
                                                     </button>
                                                 </div>
-                                                {/* 상태 초기화 */}
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        if (confirm('이 배송건의 상태를 초기화하시겠습니까?')) {
-                                                            updateGroupStatus(group.ids, {
-                                                                completed: false,
-                                                                canceled: false,
-                                                                cancel_type: null,
-                                                                completed_at: null,
-                                                                arrived_at: null
-                                                            });
-                                                        }
-                                                    }}
-                                                    className="w-full py-3 text-sm font-bold rounded-xl bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-1"
-                                                >
-                                                    ↺ 상태 초기화
-                                                </button>
+                                                {/* 기사변경 + 상태초기화 */}
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setMoveDriverModal({ isOpen: true, targetIds: group.ids, currentDriver: group.driver || '' });
+                                                            setMoveDriverTarget('');
+                                                        }}
+                                                        className="py-3 text-sm font-bold rounded-xl bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-1"
+                                                    >
+                                                        🚚 기사변경
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (confirm('이 배송건의 상태를 초기화하시겠습니까?')) {
+                                                                updateGroupStatus(group.ids, {
+                                                                    completed: false,
+                                                                    canceled: false,
+                                                                    cancel_type: null,
+                                                                    completed_at: null,
+                                                                    arrived_at: null
+                                                                });
+                                                            }
+                                                        }}
+                                                        className="py-3 text-sm font-bold rounded-xl bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-1"
+                                                    >
+                                                        ↺ 상태초기화
+                                                    </button>
+                                                </div>
 
                                                 <button 
                                                     onClick={(e) => { e.stopPropagation(); handleNavigation(group.lat, group.lng, group.address); }} 
@@ -6116,47 +6129,8 @@ ${logContent}
 
                                 
 
-                                {/* 데이터 동기화 (백업/복원) */}
-                                <div className="mt-4 flex gap-2">
-                                    {isDriverChangeMode && (
-                                    {isDriverChangeMode && (
-                                        <button 
-                                            onClick={() => {
-                                                setIsDriverChangeMode(false);
-                                                setSelectedDriverChangeIds(new Set());
-                                                setToastMsg('취소되었습니다.');
-                                            }} 
-                                            className="flex-1 bg-slate-500 text-white py-4 rounded-lg font-bold hover:bg-slate-600 transition text-sm shadow-lg flex items-center justify-center gap-2"
-                                        >
-                                            <span className="text-xl">❌</span>
-                                            <span>취소</span>
-                                        </button>
-                                    )}
-                                    <button 
-                                        onClick={() => {
-                                            if (isDriverChangeMode) {
-                                                handleBatchDriverChange();
-                                            } else {
-                                                setIsDriverChangeMode(true);
-                                                setToastMsg('📌 기사 변경 모드: 배송 건을 선택해주세요.');
-                                            }
-                                        }}
-                                        className={`flex-1 py-4 rounded-lg font-bold transition text-sm shadow-sm flex items-center justify-center gap-2 ${
-                                            isDriverChangeMode 
-                                            ? 'bg-green-600 text-white hover:bg-green-700 shadow-lg animate-pulse' 
-                                            : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 shadow-sm'
-                                        }`}
-                                    >
-                                        <span className="text-xl">🔄</span>
-                                        <span>{isDriverChangeMode ? `변경 적용 (${selectedDriverChangeIds.size})` : '기사변경'}</span>
-                                    </button>
-                                </div>
-
-                                
                                 {/* FAB - 상차스캔 + 완료사진 (우측 고정) */}
-                                {view === 'driver' && (() => {
-                                    const [fabOpen, setFabOpen] = React.useState(false);
-                                    return (
+                                {view === 'driver' && (
                                         <div className="fixed bottom-20 right-4 z-50 flex flex-col items-end gap-2">
                                             {fabOpen && (
                                                 <>
@@ -6200,8 +6174,7 @@ ${logContent}
                                                 {fabOpen ? '✕' : '+'}
                                             </button>
                                         </div>
-                                    );
-                                })()}
+                                )}
 
                                 {/* Undo Button (Floating) */}
                                 {history.length > 0 && (
@@ -6629,78 +6602,6 @@ ${logContent}
                     )}
 
                     {/* 월별 비용 합계 모달 */}
-                    {/* 기사 변경 모달 */}
-                    {driverTransferModal && (() => {
-                        const driverList = [...new Set(
-                            deliveries.map(d => d.driver).filter(d => d && String(d).trim())
-                        )].sort();
-                        return (
-                            <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/50" onClick={() => { setDriverTransferModal(null); setSelectedDriver(''); }}>
-                                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
-                                    <h3 className="text-xl font-black text-slate-800 mb-1">🚚 기사 변경</h3>
-                                    <p className="text-sm text-slate-500 mb-4">이 배송 건을 전달할 기사님을 선택해주세요.</p>
-
-                                    <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
-                                        {driverList.map(d => (
-                                            <button
-                                                key={d}
-                                                onClick={() => setSelectedDriver(d)}
-                                                className={`w-full text-left px-4 py-3 rounded-xl border text-base font-bold transition-all ${
-                                                    selectedDriver === d
-                                                    ? 'bg-indigo-600 text-white border-indigo-600'
-                                                    : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-50'
-                                                }`}
-                                            >
-                                                {d} 기사님
-                                            </button>
-                                        ))}
-                                        {driverList.length === 0 && (
-                                            <p className="text-center text-slate-400 py-4">등록된 기사가 없습니다</p>
-                                        )}
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <button
-                                            onClick={() => { setDriverTransferModal(null); setSelectedDriver(''); }}
-                                            className="py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm"
-                                        >
-                                            취소
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                if (!selectedDriver) { alert('기사님을 선택해주세요.'); return; }
-                                                // driver 변경 + memo에 기사변경 이력 기재
-                                                const now = new Date();
-                                                const timeStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-                                                setDeliveries(prev => {
-                                                    const next = prev.map(d => {
-                                                        if (driverTransferModal.ids.includes(d.id)) {
-                                                            const prevMemo = d.memo ? d.memo + ' / ' : '';
-                                                            return {
-                                                                ...d,
-                                                                driver: selectedDriver,
-                                                                memo: `${prevMemo}[기사변경 ${timeStr}] ${d.driver || '미배정'} → ${selectedDriver}`
-                                                            };
-                                                        }
-                                                        return d;
-                                                    });
-                                                    StorageManager.saveDeliveries(next);
-                                                    return next;
-                                                });
-                                                setDriverTransferModal(null);
-                                                setSelectedDriver('');
-                                                alert(`✅ ${selectedDriver} 기사님으로 변경되었습니다.`);
-                                            }}
-                                            className={`py-3 rounded-xl font-bold text-sm text-white transition-all ${selectedDriver ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-300 cursor-not-allowed'}`}
-                                        >
-                                            이동하기
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })()}
-
                     {showBarcodeScanner && (
                         <div className="fixed inset-0 z-[70] bg-black flex flex-col">
                             <div className="flex items-center justify-between px-4 py-3 bg-black">
@@ -6944,3 +6845,5 @@ ${logContent}
     </script>
 </body>
 </html>
+
+
