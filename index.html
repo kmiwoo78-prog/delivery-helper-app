@@ -2505,72 +2505,96 @@
                 setToastMsg("📢 공지사항이 업데이트되었습니다.");
             };
 
-            // [기능] 고객 배달 완료 내역 엑셀 다운로드
-            async function downloadCustomerExcel() {
+            // [기능] 고객 배달 완료 내역 엑셀 다운로드 (월별 or 일별)
+            async function downloadCustomerExcel(targetDate = null) {
                 const targetMonth = customerFilterMonth;
-                // [Server Validation Simulation] 데이터 유효성 검증
-                const filtered = deliveries.filter(d => String(d.date || '').startsWith(targetMonth));
-                
+                // 일별이면 해당 날짜, 월별이면 해당 월 전체
+                const filtered = targetDate
+                    ? deliveries.filter(d => String(d.date || '') === targetDate)
+                    : deliveries.filter(d => String(d.date || '').startsWith(targetMonth));
+
                 if (filtered.length === 0) {
-                    alert("선택한 월에 배달 데이터가 없습니다.");
+                    alert(targetDate ? `${targetDate} 날짜에 데이터가 없습니다.` : "선택한 월에 배달 데이터가 없습니다.");
                     return;
                 }
 
                 try {
                     const workbook = new ExcelJS.Workbook();
-                    const sheet = workbook.addWorksheet('배송현황');
-                    
+                    const sheetName = targetDate ? `배송현황_${targetDate}` : '배송현황';
+                    const sheet = workbook.addWorksheet(sheetName);
+
                     sheet.columns = [
-                        { header: '상태', key: 'status', width: 10 },
-                        { header: '배송일', key: 'date', width: 15 },
-                        { header: '주문번호', key: 'order_number', width: 15 }, // [New]
-                        { header: '송장번호', key: 'invoice_number', width: 15 }, // [New]
+                        { header: '상태', key: 'status', width: 8 },
+                        { header: '배송일', key: 'date', width: 13 },
+                        { header: '주문번호', key: 'order_number', width: 14 },
+                        { header: '송장번호', key: 'invoice_number', width: 14 },
                         { header: '고객명(상품명)', key: 'item', width: 30 },
-                        { header: '전화번호', key: 'phone', width: 15 },
+                        { header: '전화번호', key: 'phone', width: 14 },
                         { header: '주소', key: 'address', width: 40 },
-                        { header: '센터', key: 'center', width: 10 }, // [New]
-                        { header: '지역', key: 'region', width: 10 }, // [New]
-                        { header: '담당기사', key: 'driver', width: 10 }, // [New]
+                        { header: '예약시간', key: 'time', width: 10 },
+                        { header: '담당기사', key: 'driver', width: 10 },
+                        { header: '기사변경', key: 'driver_memo', width: 20 },
                         { header: '설치비', key: 'install_fee', width: 12 },
                         { header: '양중비', key: 'yangjung', width: 12 },
                         { header: '내림비', key: 'naerim', width: 12 },
                         { header: '기타비용', key: 'etc_fee', width: 12 },
                         { header: '메모', key: 'memo', width: 30 },
                     ];
-                    
-                    // 스타일
+
                     sheet.getRow(1).font = { bold: true };
                     sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } };
-                    
-                    // 데이터 추가
+
                     filtered.forEach(d => {
                         let status = '대기';
                         if (d.completed) status = '완료';
                         else if (d.partial) status = '부분';
-                        else if (d.canceled) {
-                            status = d.cancel_type === 'postpone' ? '연기' : '취소';
+                        else if (d.canceled) status = d.cancel_type === 'postpone' ? '연기' : '취소';
+
+                        // 연기/취소는 설치비 0원
+                        const isCanceled = d.canceled;
+                        const installFee = isCanceled ? 0 : (Number(d.install_fee) || 0);
+                        const yangjung  = isCanceled ? 0 : (Number(d.yangjung)   || 0);
+                        const naerim    = isCanceled ? 0 : (Number(d.naerim)     || 0);
+                        const etcFee    = isCanceled ? 0 : (Number(d.etc_fee)    || 0);
+
+                        // 기사변경 이력 추출 (메모에서 [기사변경...] 부분)
+                        const driverMemo = (d.memo || '').match(/\[기사변경[^\]]*\]/g)?.join(' ') || '';
+                        const cleanMemo  = (d.memo || '').replace(/\[기사변경[^\]]*\]\s*\/?/g, '').trim();
+
+                        const row = sheet.addRow({
+                            status,
+                            date: d.date,
+                            order_number:   Number(d.order_number) || d.order_number || '',
+                            invoice_number: String(d.invoice_number || ''),
+                            item:    d.item    || '',
+                            phone:   d.phone   || '',
+                            address: d.address || '',
+                            time:    d.time    || '',
+                            driver:  d.driver  || '',
+                            driver_memo: driverMemo,
+                            install_fee: installFee,
+                            yangjung,
+                            naerim,
+                            etc_fee: etcFee,
+                            memo: cleanMemo
+                        });
+
+                        // 주문번호(C행) 숫자 포맷
+                        const orderCell = row.getCell('order_number');
+                        if (!isNaN(Number(d.order_number)) && d.order_number) {
+                            orderCell.value = Number(d.order_number);
+                            orderCell.numFmt = '0';
                         }
 
-                        sheet.addRow({
-                            status: status,
-                            date: d.date,
-                            order_number: d.order_number || '', // [New]
-                            invoice_number: d.invoice_number || '', // [New]
-                            item: d.item,
-                            phone: d.phone,
-                            address: d.address,
-                            center: d.center || '', // [New]
-                            region: d.region || '', // [New]
-                            driver: d.driver || '', // [New]
-                            install_fee: d.install_fee || 0,
-                            yangjung: d.yangjung || 0,
-                            naerim: d.naerim || 0,
-                            etc_fee: d.etc_fee || 0,
-                            memo: d.memo || ''
-                        });
+                        // 연기/취소 행 회색으로 표시
+                        if (isCanceled) {
+                            row.eachCell(cell => {
+                                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+                            });
+                        }
                     });
 
-                    // 숫자 포맷
+                    // 숫자 컬럼 포맷
                     ['install_fee', 'yangjung', 'naerim', 'etc_fee'].forEach(key => {
                         sheet.getColumn(key).numFmt = '#,##0';
                     });
@@ -2579,7 +2603,9 @@
                     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
                     const a = document.createElement('a');
                     a.href = URL.createObjectURL(blob);
-                    a.download = `배송현황_${targetMonth.replace('-', '')}.xlsx`;
+                    a.download = targetDate
+                        ? `배송현황_${targetDate}.xlsx`
+                        : `배송현황_${targetMonth.replace('-', '')}.xlsx`;
                     a.click();
                 } catch(e) {
                     console.error(e);
@@ -5423,6 +5449,9 @@ ${logContent}
                                         <div className="flex gap-2 mb-4 bg-slate-50 p-2 rounded-lg border border-slate-100">
                                             <input type="date" className="bg-white border p-2 rounded text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 w-full" 
                                                 value={customerFilterDate} onChange={e => setCustomerFilterDate(e.target.value)} />
+                                            <button onClick={() => downloadCustomerExcel(customerFilterDate)} className="flex-1 bg-green-600 text-white px-3 py-2 rounded text-sm font-bold hover:bg-green-700 flex items-center justify-center gap-1 shadow-sm whitespace-nowrap">
+                                                <span>📥</span> 엑셀 다운로드
+                                            </button>
                                         </div>
                                     )}
 
