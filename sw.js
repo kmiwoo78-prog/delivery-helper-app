@@ -1,4 +1,4 @@
-const CACHE_NAME = 'delivery-master-v1';
+const CACHE_NAME = 'delivery-master-v2';
 const ASSETS_TO_CACHE = [
     './index.html',
     './manifest.json',
