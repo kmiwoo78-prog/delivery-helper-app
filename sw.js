@@ -1,24 +1,24 @@
-const CACHE_NAME = 'delivery-master-v2';
+const CACHE_NAME = 'delivery-master-v3';
+// [Fix] 외부 CDN은 install 단계에서 강제 캐싱하지 않음 (CORS 오류로 전체 설치 실패 방지)
+// 외부 리소스는 fetch 핸들러에서 동적으로 캐싱됨
 const ASSETS_TO_CACHE = [
     './index.html',
     './manifest.json',
-    './icon.svg',
-    'https://cdn.tailwindcss.com',
-    'https://unpkg.com/react@18/umd/react.development.js',
-    'https://unpkg.com/react-dom@18/umd/react-dom.development.js',
-    'https://unpkg.com/@babel/standalone/babel.min.js',
-    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
-    'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js',
-    'https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap'
+    './icon.svg'
 ];
 
-// 설치: 캐시 초기화
+// 설치: 캐시 초기화 (개별 캐싱으로 변경, 하나 실패해도 전체 설치는 성공)
 self.addEventListener('install', (event) => {
     event.waitUntil(
         caches.open(CACHE_NAME).then((cache) => {
             console.log('[ServiceWorker] Caching app shell');
-            return cache.addAll(ASSETS_TO_CACHE);
+            return Promise.all(
+                ASSETS_TO_CACHE.map((url) =>
+                    cache.add(url).catch((err) => {
+                        console.warn('[ServiceWorker] Failed to cache:', url, err);
+                    })
+                )
+            );
         })
     );
     self.skipWaiting();
@@ -51,19 +51,24 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
         caches.match(event.request).then((response) => {
             // 캐시 적중 시 반환, 아니면 네트워크 요청
-            return response || fetch(event.request).then((networkResponse) => {
-                // 유효한 응답인지 확인
-                if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+            if (response) return response;
+
+            return fetch(event.request).then((networkResponse) => {
+                // 유효한 응답인지 확인 (opaque 응답은 status가 0이라 조건 완화)
+                if (!networkResponse || (networkResponse.status !== 200 && networkResponse.type !== 'opaque')) {
                     return networkResponse;
                 }
 
-                // 외부 CDN 등은 캐시에 저장
+                // 캐시 저장 (실패해도 무시하고 응답은 정상 반환)
                 const responseToCache = networkResponse.clone();
                 caches.open(CACHE_NAME).then((cache) => {
-                    cache.put(event.request, responseToCache);
+                    cache.put(event.request, responseToCache).catch(() => {});
                 });
 
                 return networkResponse;
+            }).catch((err) => {
+                console.warn('[ServiceWorker] Fetch failed:', event.request.url, err);
+                throw err;
             });
         })
     );
