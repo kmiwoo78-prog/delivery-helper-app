@@ -20,13 +20,26 @@
     <link rel="icon" href="./icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./icon.svg">
     
-    <!-- Service Worker Registration -->
+    <!-- Service Worker: 기존 캐시 전체 삭제 후 등록 해제 -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
-                    .then(registration => console.log('SW registered: ', registration.scope))
-                    .catch(err => console.log('SW registration failed: ', err));
+                // 모든 캐시 삭제
+                if (window.caches) {
+                    caches.keys().then(keys => {
+                        keys.forEach(key => {
+                            caches.delete(key);
+                            console.log('[SW Cleanup] Cache deleted:', key);
+                        });
+                    });
+                }
+                // 기존 서비스워커 모두 해제
+                navigator.serviceWorker.getRegistrations().then(registrations => {
+                    registrations.forEach(registration => {
+                        registration.unregister();
+                        console.log('[SW Cleanup] Unregistered:', registration.scope);
+                    });
+                });
             });
         }
     </script>
@@ -6467,14 +6480,7 @@ ${logContent}
                 </ErrorBoundary>
             );
 
-            // Service Worker Registration
-            if ('serviceWorker' in navigator) {
-                window.addEventListener('load', () => {
-                    navigator.serviceWorker.register('./sw.js')
-                        .then(registration => console.log('SW registered'))
-                        .catch(err => console.log('SW registration failed', err));
-                });
-            }
+            // Service Worker 등록 제거됨 (캐시 오류 방지)
     </script>
 
     <!-- [AdSense] Initialization Guard -->
