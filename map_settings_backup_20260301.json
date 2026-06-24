@@ -1,0 +1,68 @@
+{
+  "timestamp": "2026-03-01T00:00:00Z",
+  "numbering_strategy": "nearest_neighbor + bearing_penalty + destination_weight",
+  "constants": {
+    "TURN_PENALTY": 0.4,
+    "DEST_WEIGHT": 0.6
+  },
+  "styles": {
+    "segment_line": {
+      "color": "#2563eb",
+      "weight": 4,
+      "opacity": 0.7,
+      "dashArray": "10, 10"
+    },
+    "route_line": {
+      "color": "#10b981",
+      "weight": 4,
+      "opacity": 0.85
+    },
+    "start_marker": {
+      "type": "divIcon",
+      "bg": "#2563eb",
+      "size": 20,
+      "border": "2px solid white"
+    },
+    "sequence_marker": {
+      "type": "divIcon",
+      "bg": "#ef4444",
+      "text": "order number",
+      "size": 24,
+      "textColor": "white",
+      "border": "2px solid white"
+    },
+    "destination_marker": {
+      "type": "divIcon",
+      "emoji": "🏠",
+      "bg": "#10b981",
+      "size": 30
+    }
+  },
+  "distance_display": {
+    "popup_distance": "prev_to_current_km_one_decimal",
+    "first_leg": "start_to_first"
+  },
+  "popup_buttons": [
+    "배송출발",
+    "순서변경",
+    "닫기"
+  ],
+  "geocoding": {
+    "bounded_search_boxes": {
+      "incheon": { "left": 126.52, "top": 37.55, "right": 126.80, "bottom": 37.30 },
+      "gimpo": { "left": 126.55, "top": 37.75, "right": 126.85, "bottom": 37.50 }
+    },
+    "region_centers": {
+      "인천": { "lat": 37.4563, "lng": 126.7052 },
+      "미추홀구": { "lat": 37.444, "lng": 126.687 },
+      "중구": { "lat": 37.4609, "lng": 126.5547 },
+      "김포시": { "lat": 37.6153, "lng": 126.7150 },
+      "서울": { "lat": 37.5665, "lng": 126.9780 },
+      "대한민국중심": { "lat": 36.5, "lng": 127.8 }
+    },
+    "fallback_jitter": {
+      "delta_range_deg": 0.0009,
+      "seed": "address_hash"
+    }
+  }
+}
