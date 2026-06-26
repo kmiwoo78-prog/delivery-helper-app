@@ -48,7 +48,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone@7.22.5/babel.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.23.10/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
     <!-- SortableJS (드래그 앤 드롭) -->
@@ -1457,6 +1457,10 @@
         function App() {
             // [State] Global & UI
             const [fatalError, setFatalError] = useState(null); // [New] Critical Error State
+            // 상태: 출발지, 도착지, 날짜
+            const [startPoint, setStartPoint] = useState(null); // { lat, lng, address }
+            const [endPoint, setEndPoint] = useState(null); // { lat, lng, address }
+            const [targetDate, setTargetDate] = useState(parseCustomDate(null));
             // [Auth] Auto Login Check
             const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('delivery_app_session_driver'));
             const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('delivery_app_session_driver') || null);
@@ -2454,10 +2458,6 @@
                 return new Date(d.getTime() - offset).toISOString().split('T')[0];
             };
 
-            // 상태: 출발지, 도착지, 날짜
-            const [startPoint, setStartPoint] = useState(null); // { lat, lng, address }
-            const [endPoint, setEndPoint] = useState(null); // { lat, lng, address }
-            const [targetDate, setTargetDate] = useState(parseCustomDate(null));
 
             // 입력 폼
             const [form, setForm] = useState({ 
