@@ -997,6 +997,109 @@
             return path;
         }
 
+        // [컴포넌트] Card - 공통 카드 레이아웃
+        function Card({ title, description, children, className = '' }) {
+            return (
+                <div className={"bg-white rounded-2xl shadow-sm border border-slate-100 p-4 " + className}>
+                    {title && (
+                        <div className="mb-1">
+                            <div className="text-xl font-bold text-slate-800">{title}</div>
+                            {description && <div className="text-xs text-slate-500 mt-0.5">{description}</div>}
+                        </div>
+                    )}
+                    {children}
+                </div>
+            );
+        }
+
+        // [컴포넌트] GuideModal - 사용법 안내 모달
+        function GuideModal({ isOpen, onClose }) {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+                    <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-xl font-bold text-slate-800">📖 사용 가이드</h2>
+                            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">✕</button>
+                        </div>
+                        <div className="space-y-4 text-sm text-slate-700">
+                            <div><h3 className="font-bold text-indigo-700 mb-1">🚚 기사 모드</h3><p>오늘 배송할 목록을 확인하고, 배송 완료/취소 처리를 합니다. 지도에서 경로를 확인할 수 있습니다.</p></div>
+                            <div><h3 className="font-bold text-indigo-700 mb-1">🛠 관리자 모드</h3><p>배송 데이터를 등록/수정/삭제하고, 엑셀로 다운로드할 수 있습니다. 기사별 배송 현황을 관리합니다.</p></div>
+                            <div><h3 className="font-bold text-indigo-700 mb-1">☁️ 클라우드 동기화</h3><p>Supabase 설정 후 여러 기기에서 실시간으로 데이터를 공유할 수 있습니다.</p></div>
+                            <div><h3 className="font-bold text-indigo-700 mb-1">📊 엑셀 다운로드</h3><p>날짜별/월별로 배송 현황을 엑셀 파일로 내보낼 수 있습니다.</p></div>
+                        </div>
+                        <button onClick={onClose} className="mt-6 w-full bg-indigo-600 text-white py-2.5 rounded-xl font-bold hover:bg-indigo-700 transition">확인</button>
+                    </div>
+                </div>
+            );
+        }
+
+        // [컴포넌트] CloudSettingsModal - Supabase 연결 설정 모달
+        function CloudSettingsModal({ isOpen, onClose, onReset }) {
+            const [url, setUrl] = React.useState(() => {
+                const cfg = (() => { try { return JSON.parse(localStorage.getItem('mvp_supabase_config') || 'null'); } catch(e) { return null; } })();
+                return cfg ? cfg.url : '';
+            });
+            const [key, setKey] = React.useState(() => {
+                const cfg = (() => { try { return JSON.parse(localStorage.getItem('mvp_supabase_config') || 'null'); } catch(e) { return null; } })();
+                return cfg ? cfg.key : '';
+            });
+            const [saving, setSaving] = React.useState(false);
+
+            if (!isOpen) return null;
+
+            const handleSave = () => {
+                setSaving(true);
+                try {
+                    if (url && key) {
+                        localStorage.setItem('mvp_supabase_config', JSON.stringify({ url: url.trim(), key: key.trim() }));
+                        alert('✅ Supabase 설정이 저장되었습니다. 앱을 새로고침하면 적용됩니다.');
+                    } else {
+                        alert('URL과 Key를 모두 입력해주세요.');
+                    }
+                } finally {
+                    setSaving(false);
+                    onClose();
+                }
+            };
+
+            const handleReset = () => {
+                if (confirm('모든 로컬 데이터를 초기화하시겠습니까?')) {
+                    localStorage.clear();
+                    if (onReset) onReset();
+                    alert('초기화 완료. 새로고침됩니다.');
+                    location.reload();
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+                    <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-xl font-bold text-slate-800">☁️ 클라우드 설정</h2>
+                            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">✕</button>
+                        </div>
+                        <div className="space-y-3 mb-4">
+                            <div>
+                                <label className="text-xs font-bold text-slate-600 mb-1 block">Supabase URL</label>
+                                <input type="text" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://xxx.supabase.co" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-600 mb-1 block">Anon Key</label>
+                                <input type="text" value={key} onChange={e => setKey(e.target.value)} placeholder="eyJhbGci..." className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                            </div>
+                        </div>
+                        <button onClick={handleSave} disabled={saving} className="w-full bg-indigo-600 text-white py-2.5 rounded-xl font-bold hover:bg-indigo-700 transition mb-2">
+                            {saving ? '저장 중...' : '설정 저장'}
+                        </button>
+                        <button onClick={handleReset} className="w-full bg-red-50 text-red-600 py-2 rounded-xl text-sm hover:bg-red-100 transition">
+                            데이터 초기화
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
         // [컴포넌트] 지도 (카카오 지도 API 완벽 연동 버전 + 디자인 및 줌 버그 픽스 병합)
         function MapView({ locations, center, startPoint }) { 
             const mapRef = useRef(null); 
