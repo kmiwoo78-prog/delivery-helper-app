@@ -1391,8 +1391,8 @@
                 <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center p-4">
                     <div className="w-full max-w-sm">
                         <div className="text-center mb-8">
-                            <div className="w-20 h-20 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
-                                <span className="text-4xl">🚚</span>
+                            <div className="w-20 h-20 rounded-2xl mx-auto mb-3 shadow-lg overflow-hidden">
+                                <img src="./icon-512.png" alt="배송마스터" className="w-full h-full object-cover" />
                             </div>
                             <h1 className="text-2xl font-black text-slate-800">배송 마스터</h1>
                             <p className="text-slate-500 text-sm mt-1">기사님, 오늘도 안전운전 하세요!</p>
@@ -4475,8 +4475,17 @@ ${logContent}
                         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between relative"> 
                             
                             <div className="flex items-center gap-3"> 
-                                <div className="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-2xl shadow"> 
-                                    🚚 
+                                <div 
+                                    className="w-12 h-12 rounded-xl overflow-hidden shadow cursor-pointer active:scale-95 transition-transform"
+                                    onClick={() => {
+                                        if (confirm('홈 화면으로 이동하시겠습니까?\n(로그아웃됩니다)')) {
+                                            localStorage.removeItem('delivery_app_session_driver');
+                                            location.reload();
+                                        }
+                                    }}
+                                    title="홈으로"
+                                > 
+                                    <img src="./icon-512.png" alt="홈으로" className="w-full h-full object-cover" />
                                 </div> 
                                 <div> 
                                     <h1 

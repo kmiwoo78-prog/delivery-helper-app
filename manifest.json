@@ -1,6 +1,6 @@
 {
   "name": "배송 마스터",
-  "short_name": "배송 마스터",
+  "short_name": "배송마스터",
   "start_url": "./index.html",
   "display": "standalone",
   "orientation": "portrait",
@@ -8,9 +8,15 @@
   "theme_color": "#4f46e5",
   "icons": [
     {
-      "src": "icon.svg",
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]
